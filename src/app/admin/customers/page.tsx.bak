@@ -1,0 +1,755 @@
+'use client'
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import Link from 'next/link'
+
+type Customer = {
+  id: number
+  name: string
+  phone: string
+  address: string
+  address_subdistrict?: string
+  address_district?: string
+  address_province?: string
+  address_zipcode?: string
+  total_orders: number
+  tags: string
+  note: string
+  reward_points: number
+  created_at: string
+}
+
+type Order = {
+  id: number
+  order_date: string
+  status: string
+  total: number
+  items_summary: string
+}
+
+type Product = {
+  id: number
+  name: string
+  sku: string
+}
+
+type Tier = {
+  id: number
+  name: string
+  discount_percent: number
+}
+
+type Tag = {
+  id: number
+  name: string
+  color: string
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  shipped: 'จัดส่งแล้ว',
+  pending: 'รอดำเนินการ',
+  completed: 'สำเร็จ',
+  cancelled: 'ยกเลิก',
+}
+
+const STATUS_BADGE: Record<string, string> = {
+  shipped: 'badge-green',
+  pending: 'badge-gold',
+  completed: 'badge-gold',
+  cancelled: 'badge-red',
+}
+
+export default function CustomersPage() {
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [filtered, setFiltered] = useState<Customer[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+  const [customerOrders, setCustomerOrders] = useState<Order[]>([])
+  const [ordersLoading, setOrdersLoading] = useState(false)
+
+  // Edit states
+  const [editName, setEditName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editAddress, setEditAddress] = useState('')
+  const [editSubdistrict, setEditSubdistrict] = useState('')
+  const [editDistrict, setEditDistrict] = useState('')
+  const [editProvince, setEditProvince] = useState('')
+  const [editZipcode, setEditZipcode] = useState('')
+  const [editNote, setEditNote] = useState('')
+  
+  // Custom Discount States
+  const [editTags, setEditTags] = useState('') // General arbitrary tags
+  const [tierTag, setTierTag] = useState('NORMAL')
+  const [productDiscounts, setProductDiscounts] = useState<{sku: string, amount: number}[]>([])
+  
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  // Create new customer states
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newPhone, setNewPhone] = useState('')
+  const [newAddress, setNewAddress] = useState('')
+  const [newSubdistrict, setNewSubdistrict] = useState('')
+  const [newDistrict, setNewDistrict] = useState('')
+  const [newProvince, setNewProvince] = useState('')
+  const [newZipcode, setNewZipcode] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  const [availableTiers, setAvailableTiers] = useState<Tier[]>([])
+  const [availableTags, setAvailableTags] = useState<Tag[]>([])
+
+  useEffect(() => {
+    async function load() {
+      const [cRes, pRes, tRes, gRes] = await Promise.all([
+        supabase.from('customers').select('*').order('id', { ascending: false }),
+        supabase.from('products').select('id, name, sku').order('id'),
+        supabase.from('customer_tiers').select('*').order('discount_percent', { ascending: true }),
+        supabase.from('customer_tags').select('*').order('name', { ascending: true })
+      ])
+      if (cRes.data) {
+        setCustomers(cRes.data)
+        setFiltered(cRes.data)
+        if (cRes.data.length > 0) {
+          const first = cRes.data[0]
+          setSelectedCustomer(first)
+          setEditName(first.name || '')
+          setEditPhone(first.phone || '')
+          setEditAddress(first.address || '')
+          setEditSubdistrict(first.address_subdistrict || '')
+          setEditDistrict(first.address_district || '')
+          setEditProvince(first.address_province || '')
+          setEditZipcode(first.address_zipcode || '')
+          setEditNote(first.note || '')
+          setEditTags(first.tags || '')
+        }
+      }
+      if (pRes.data) setProducts(pRes.data)
+      if (tRes.data) setAvailableTiers(tRes.data)
+      if (gRes.data) setAvailableTags(gRes.data)
+      setLoading(false)
+    }
+    load()
+  }, [])
+
+  useEffect(() => {
+    const q = search.toLowerCase()
+    setFiltered(customers.filter(c =>
+      c.name?.toLowerCase().includes(q) ||
+      c.phone?.includes(q) ||
+      c.tags?.toLowerCase().includes(q)
+    ))
+  }, [search, customers])
+
+  useEffect(() => {
+    if (selectedCustomer) {
+      setEditName(selectedCustomer.name || '')
+      setEditPhone(selectedCustomer.phone || '')
+      setEditAddress(selectedCustomer.address || '')
+      setEditSubdistrict(selectedCustomer.address_subdistrict || '')
+      setEditDistrict(selectedCustomer.address_district || '')
+      setEditProvince(selectedCustomer.address_province || '')
+      setEditZipcode(selectedCustomer.address_zipcode || '')
+      setEditNote(selectedCustomer.note || '')
+      
+      const tags = selectedCustomer.tags ? selectedCustomer.tags.split(',').map(s=>s.trim()).filter(Boolean) : []
+      
+      // 1. Tier Tag
+      const tierMap = new Set(availableTiers.map(t => t.name))
+      const foundTier = tags.find(t => tierMap.has(t)) || 'NORMAL'
+      setTierTag(foundTier)
+
+      // 2. Product Discounts
+      const discList: {sku: string, amount: number}[] = []
+      tags.forEach(t => {
+        if (t.startsWith('DISC_')) {
+          const parts = t.replace('DISC_', '').split(':-')
+          if (parts.length === 2) {
+            const sku = parts[0]
+            const amount = parseInt(parts[1]) || 0
+            discList.push({ sku, amount })
+          }
+        }
+      })
+      setProductDiscounts(discList)
+
+      // 3. General Tags
+      const general = tags.filter(t => !tierMap.has(t) && !t.startsWith('DISC_'))
+      setEditTags(general.join(', '))
+
+      async function loadCustomerOrders(customerId: number) {
+        setOrdersLoading(true)
+        const { data } = await supabase
+          .from('orders')
+          .select('id, order_date, status, total, items_summary')
+          .eq('customer_id', customerId)
+          .order('order_date', { ascending: false })
+        if (data) setCustomerOrders(data)
+        setOrdersLoading(false)
+      }
+      loadCustomerOrders(selectedCustomer.id)
+    }
+  }, [selectedCustomer, availableTiers])
+
+  const addProductDiscount = () => {
+    if (products.length === 0) return
+    setProductDiscounts([...productDiscounts, { sku: products[0].sku, amount: 0 }])
+  }
+
+  const updateProductDiscount = (index: number, key: string, value: any) => {
+    const newList = [...productDiscounts]
+    newList[index] = { ...newList[index], [key]: value }
+    setProductDiscounts(newList)
+  }
+
+  const removeProductDiscount = (index: number) => {
+    const newList = [...productDiscounts]
+    newList.splice(index, 1)
+    setProductDiscounts(newList)
+  }
+
+  const toggleGeneralTag = (tagName: string) => {
+    const current = editTags.split(',').map(t => t.trim()).filter(Boolean)
+    const exists = current.includes(tagName)
+    const updated = exists ? current.filter(t => t !== tagName) : [...current, tagName]
+    setEditTags(updated.join(', '))
+  }
+
+  const handleSaveCustomer = async () => {
+    if (!selectedCustomer) return
+    setSaving(true)
+    
+    // Reconstruct tags string
+    const finalTagsArray: string[] = []
+    if (editTags.trim()) finalTagsArray.push(...editTags.split(',').map(t => t.trim()).filter(Boolean))
+    if (tierTag !== 'NORMAL') finalTagsArray.push(tierTag)
+    productDiscounts.forEach(pd => {
+      if (pd.amount > 0) finalTagsArray.push(`DISC_${pd.sku}:-${pd.amount}`)
+    })
+    const finalTags = finalTagsArray.join(', ')
+    
+    const { data: updatedCustomer, error } = await supabase
+      .from('customers')
+      .update({ 
+        name: editName.trim(),
+        phone: editPhone.trim(), 
+        address: editAddress.trim(), 
+        address_subdistrict: editSubdistrict.trim(),
+        address_district: editDistrict.trim(),
+        address_province: editProvince.trim(),
+        address_zipcode: editZipcode.trim(),
+        note: editNote.trim(), 
+        tags: finalTags
+      })
+      .eq('id', selectedCustomer.id)
+      .select()
+      .single()
+
+    if (!error && updatedCustomer) {
+      setCustomers(prev => prev.map(c => c.id === updatedCustomer.id ? updatedCustomer : c))
+      setSelectedCustomer(updatedCustomer)
+
+      // Auto-register any new general tags to customer_tags (skip DISC_, tier names, SKIN_, INTEREST_)
+      const tierNames = new Set(availableTiers.map(t => t.name))
+      const existingTagNames = new Set(availableTags.map(t => t.name))
+      const generalTagsToRegister = finalTagsArray.filter(tag =>
+        !tag.startsWith('DISC_') && !tag.startsWith('SKIN_') && !tag.startsWith('INTEREST_') &&
+        tag !== 'FOLLOWUP_NEEDED' && !tierNames.has(tag) && !existingTagNames.has(tag)
+      )
+      if (generalTagsToRegister.length > 0) {
+        const colors = ['#2ecc71', '#3498db', '#9b59b6', '#e67e22', '#1abc9c', '#e74c3c']
+        const inserts = generalTagsToRegister.map((name, i) => ({ name, color: colors[(name.length + i) % colors.length] }))
+        await supabase.from('customer_tags').upsert(inserts, { onConflict: 'name' })
+      }
+
+      alert('บันทึกสำเร็จ!')
+      setTimeout(() => setSaving(false), 500)
+    } else {
+      alert('บันทึกไม่สำเร็จ: ' + (error?.message || 'Unknown error'))
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteClick = () => {
+    if (confirmDelete) {
+      // Second click = actually delete
+      performDelete()
+    } else {
+      // First click = show confirmation
+      setConfirmDelete(true)
+      // Auto-reset after 3 seconds
+      setTimeout(() => setConfirmDelete(false), 3000)
+    }
+  }
+
+  const performDelete = async () => {
+    if (!selectedCustomer) return
+    setDeleting(true)
+    setConfirmDelete(false)
+    try {
+      // Remove related records to avoid foreign key constraints
+      await supabase.from('messages').delete().eq('customer_id', selectedCustomer.id)
+      await supabase.from('orders').delete().eq('customer_id', selectedCustomer.id)
+      const { error } = await supabase.from('customers').delete().eq('id', selectedCustomer.id)
+      if (!error) {
+        const deletedId = selectedCustomer.id
+        setSelectedCustomer(null)
+        setCustomerOrders([])
+        setCustomers(prev => prev.filter(c => c.id !== deletedId))
+      } else {
+        console.error('Delete error:', error)
+        alert('ลบไม่สำเร็จ: ' + error.message)
+      }
+    } catch (err) {
+      console.error('Delete exception:', err)
+      alert('เกิดข้อผิดพลาดในการลบ')
+    }
+    setDeleting(false)
+  }
+
+  const handleCreateCustomer = async () => {
+    if (!newName.trim()) return
+    setCreating(true)
+    const { data, error } = await supabase
+      .from('customers')
+      .insert({ 
+        name: newName.trim(), 
+        phone: newPhone.trim() || null, 
+        address: newAddress.trim() || null, 
+        address_subdistrict: newSubdistrict.trim() || null,
+        address_district: newDistrict.trim() || null,
+        address_province: newProvince.trim() || null,
+        address_zipcode: newZipcode.trim() || null,
+        total_orders: 0 
+      })
+      .select()
+      .single()
+    if (error) {
+      alert('สร้างลูกค้าไม่สำเร็จ: ' + error.message)
+    } else if (data) {
+      setCustomers(prev => [data, ...prev])
+      setSelectedCustomer(data)
+      setShowCreateForm(false)
+      setNewName('')
+      setNewPhone('')
+      setNewAddress('')
+      setNewSubdistrict('')
+      setNewDistrict('')
+      setNewProvince('')
+      setNewZipcode('')
+      setSearch('')
+    }
+    setCreating(false)
+  }
+
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      
+      {/* Topbar */}
+      <div className="topbar" style={{ flexShrink: 0, justifyContent: 'space-between' }}>
+        <span className="topbar-title">👥 ลูกค้า</span>
+        <button 
+          onClick={() => { setNewName(''); setShowCreateForm(true) }} 
+          className="btn btn-primary" 
+          style={{ padding: '8px 16px', borderRadius: 8 }}
+        >
+          + เพิ่มลูกค้าใหม่
+        </button>
+      </div>
+
+      {/* Main Split Layout */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        
+        {/* Left Panel: Master List */}
+        <div style={{ width: 380, background: 'var(--black-deep)', borderRight: '1px solid var(--gray-border)', display: 'flex', flexDirection: 'column' }}>
+          
+          <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--gray-border)' }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>รายชื่อลูกค้า ({filtered.length})</h2>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="search"
+                placeholder="🔍 ค้นหาชื่อ หรือ เบอร์โทร..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--gray-border)', background: 'var(--black-card)', color: '#fff', fontSize: 13 }}
+              />
+            </div>
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {loading ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-text)' }}>⏳ กำลังโหลดข้อมูล...</div>
+            ) : filtered.length === 0 ? (
+              <div>
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-text)' }}>ไม่พบลูกค้าที่ตรงกัน</div>
+                {search.trim() && (
+                  <div
+                    onClick={() => { setNewName(search.trim()); setShowCreateForm(true) }}
+                    style={{ padding: '14px 24px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, color: 'var(--gold-primary)', fontSize: 13, fontWeight: 700, borderTop: '1px solid var(--gray-border)', background: 'rgba(201,168,76,0.06)', transition: 'background 0.2s' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(201,168,76,0.14)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'rgba(201,168,76,0.06)')}
+                  >
+                    <span style={{ fontSize: 18 }}>＋</span> สร้างลูกค้าใหม่ "{search.trim()}"
+                  </div>
+                )}
+                {/* Inline create form */}
+                {showCreateForm && (
+                  <div style={{ padding: 16, margin: '0 12px 12px', background: 'rgba(201,168,76,0.07)', border: '1px solid var(--gold-dark)', borderRadius: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gold-primary)', marginBottom: 12 }}>
+                      ➕ สร้างลูกค้าใหม่: <span style={{ color: '#fff' }}>{newName}</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, color: 'var(--gray-text)', marginBottom: 6 }}>ผู้รับ / เบอร์โทรศัพท์</label>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <input type="text" className="input" placeholder="ชื่อผู้รับ" value={newName} onChange={e => setNewName(e.target.value)} style={{ flex: 1.5, fontSize: 13 }} />
+                          <input type="tel" className="input" placeholder="เบอร์โทร" value={newPhone} onChange={e => setNewPhone(e.target.value)} style={{ flex: 1, fontSize: 13 }} />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, color: 'var(--gray-text)', marginBottom: 6 }}>ที่อยู่จัดส่ง (บ้านเลขที่, ถนน, หมู่บ้าน)</label>
+                        <textarea className="input" rows={2} placeholder="รายละเอียดบ้านเลขที่ และถนน..." value={newAddress} onChange={e => setNewAddress(e.target.value)} style={{ width: '100%', fontSize: 13, resize: 'none' }} />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 10, color: 'var(--gray-text)', marginBottom: 4 }}>ตำบล / แขวง</label>
+                          <input type="text" className="input" value={newSubdistrict} onChange={e => setNewSubdistrict(e.target.value)} style={{ width: '100%', fontSize: 12 }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 10, color: 'var(--gray-text)', marginBottom: 4 }}>อำเภอ / เขต</label>
+                          <input type="text" className="input" value={newDistrict} onChange={e => setNewDistrict(e.target.value)} style={{ width: '100%', fontSize: 12 }} />
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 10, color: 'var(--gray-text)', marginBottom: 4 }}>จังหวัด</label>
+                          <input type="text" className="input" value={newProvince} onChange={e => setNewProvince(e.target.value)} style={{ width: '100%', fontSize: 12 }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 10, color: 'var(--gray-text)', marginBottom: 4 }}>รหัสไปรษณีย์</label>
+                          <input type="text" className="input" value={newZipcode} onChange={e => setNewZipcode(e.target.value)} style={{ width: '100%', fontSize: 12, letterSpacing: 1 }} />
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" onClick={handleCreateCustomer} disabled={creating} className="btn btn-primary" style={{ padding: '8px 16px', fontSize: 12 }}>
+                        {creating ? '⏳ กำลังสร้าง...' : '✓ สร้างลูกค้า'}
+                      </button>
+                      <button type="button" onClick={() => setShowCreateForm(false)} className="btn btn-ghost" style={{ padding: '8px 14px', fontSize: 12 }}>
+                        ยกเลิก
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              filtered.map((c) => {
+                const isSelected = selectedCustomer?.id === c.id
+                // Preview Tags Badges
+                const cTags = c.tags ? c.tags.split(',').map(s=>s.trim()) : []
+                const tierMap = new Set(availableTiers.map(t => t.name).filter(n => n !== 'NORMAL'))
+                const tierName = cTags.find(t => tierMap.has(t))
+                const hasDisc = cTags.some(t => t.startsWith('DISC_'))
+
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => setSelectedCustomer(c)}
+                    style={{
+                      padding: '16px 24px',
+                      borderBottom: '1px solid rgba(255,255,255,0.04)',
+                      background: isSelected ? 'var(--black-hover)' : 'transparent',
+                      borderLeft: isSelected ? '4px solid var(--success)' : '4px solid transparent',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div className="avatar" style={{ width: 32, height: 32, fontSize: 12, opacity: isSelected ? 1 : 0.7 }}>
+                        {c.name ? c.name.charAt(0) : '?'}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14, color: isSelected ? 'var(--white)' : 'var(--white-muted)' }}>{c.name}</div>
+                        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                          {c.phone && <div style={{ fontSize: 11, color: 'var(--gray-text)' }}>{c.phone}</div>}
+                          {tierName && <span style={{ fontSize: 9, background: 'var(--gold-dark)', color: '#fff', padding: '1px 4px', borderRadius: 4 }}>{tierName}</span>}
+                          {hasDisc && <span style={{ fontSize: 9, background: 'var(--danger)', color: '#fff', padding: '1px 4px', borderRadius: 4 }}>DISC</span>}
+                        </div>
+                      </div>
+                    </div>
+                    {c.total_orders > 0 && (
+                      <div style={{ background: 'rgba(76, 175, 118, 0.15)', color: 'var(--success)', padding: '4px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>
+                        🛒 {c.total_orders}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Right Panel: Detail View */}
+        <div style={{ flex: 1, background: 'var(--black-card)', overflowY: 'auto' }}>
+          {selectedCustomer ? (
+            <div className="animate-in" style={{ padding: '32px 48px', maxWidth: 900, margin: '0 auto' }}>
+              
+              {/* Header Box */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 40, paddingBottom: 32, borderBottom: '1px solid var(--gray-border)' }}>
+                <div style={{ display: 'flex', gap: 24, alignItems: 'center', flex: 1, minWidth: 0, paddingRight: 20 }}>
+                  <div className="avatar" style={{ width: 80, height: 80, fontSize: 32, flexShrink: 0, background: 'linear-gradient(135deg, var(--gold-primary), var(--gold-dark))' }}>
+                    {selectedCustomer.name ? selectedCustomer.name.charAt(0) : '?'}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', marginBottom: 12 }}>
+                      <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>{selectedCustomer.name}</h1>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {selectedCustomer.total_orders >= 5 && (
+                          <span style={{ 
+                            background: 'linear-gradient(135deg, #d4af37 0%, #b8860b 100%)', 
+                            color: '#fff', padding: '4px 14px', borderRadius: 30, 
+                            fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
+                            boxShadow: '0 4px 12px rgba(212, 175, 55, 0.2)',
+                            display: 'flex', alignItems: 'center', gap: 4
+                          }}>
+                            <span>⭐</span> VIP Customer
+                          </span>
+                        )}
+                        <span style={{ 
+                          background: 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)', 
+                          color: '#fff', padding: '4px 14px', borderRadius: 30, 
+                          fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
+                          boxShadow: '0 4px 12px rgba(46, 204, 113, 0.2)',
+                          display: 'flex', alignItems: 'center', gap: 4
+                        }}>
+                          <span>🏆</span> {selectedCustomer.reward_points || 0} Loyalty Points
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 13, color: 'var(--gray-text)' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ opacity: 0.6 }}>👤</span> 
+                        เป็นลูกค้าตั้งแต่ {selectedCustomer.created_at ? new Date(selectedCustomer.created_at).toLocaleDateString('th-TH') : 'เก่ากว่าระบบเริ่มใช้งาน'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, width: 300, flexShrink: 0 }}>
+                  <Link href={`/admin/conversations?customer_id=${selectedCustomer.id}`} className="btn btn-ghost" style={{ borderColor: 'var(--gold-primary)', color: 'var(--gold-primary)', justifyContent: 'center' }}>
+                    💬 แชท
+                  </Link>
+                  <Link href={`/admin/orders/create?customer_id=${selectedCustomer.id}`} className="btn btn-ghost" style={{ borderColor: 'var(--gold-primary)', color: 'var(--gold-primary)', justifyContent: 'center' }}>
+                    🧾 เปิดบิลใหม่
+                  </Link>
+                  <button onClick={handleSaveCustomer} className="btn btn-primary" disabled={saving} style={{ justifyContent: 'center' }}>
+                    {saving ? 'กำลังบันทึก...' : '💾 บันทึกข้อมูล'}
+                  </button>
+                  <button onClick={handleDeleteClick} className="btn" disabled={deleting} style={{ background: confirmDelete ? 'rgba(231, 76, 60, 0.35)' : 'rgba(231, 76, 60, 0.12)', color: confirmDelete ? '#fff' : 'var(--danger)', border: confirmDelete ? '1px solid var(--danger)' : '1px solid rgba(231, 76, 60, 0.3)', transition: 'all 0.2s', animation: confirmDelete ? 'pulse 1s infinite' : 'none', justifyContent: 'center' }} onMouseEnter={e => { if (!confirmDelete) e.currentTarget.style.background = 'rgba(231, 76, 60, 0.25)' }} onMouseLeave={e => { if (!confirmDelete) e.currentTarget.style.background = 'rgba(231, 76, 60, 0.12)' }}>
+                    {deleting ? 'กำลังลบ...' : confirmDelete ? '⚠️ ยืนยันลบ' : '🗑️ ลบรายชื่อ'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Editable Fields Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, marginBottom: 32 }}>
+                
+                {/* General Info & Address */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  <div style={{ borderBottom: '1px solid var(--gray-border)', paddingBottom: 20, marginBottom: 10 }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--gray-text)', marginBottom: 16 }}>🚚 ข้อมูลการจัดส่ง</h3>
+                    
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 8 }}>ผู้รับ / เบอร์โทรศัพท์</label>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <input type="text" value={editName} onChange={e => setEditName(e.target.value)} placeholder="ชื่อผู้รับ" className="input" style={{ flex: 1.5 }} />
+                        <input type="tel" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="เบอร์โทร" className="input" style={{ flex: 1 }} />
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 8 }}>ที่อยู่จัดส่ง (บ้านเลขที่, ถนน, หมู่บ้าน)</label>
+                      <textarea value={editAddress} onChange={e => setEditAddress(e.target.value)} placeholder="รายละเอียดบ้านเลขที่ และถนน..." className="input" rows={2} style={{ width: '100%', resize: 'none' }} />
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 6 }}>ตำบล / แขวง</label>
+                        <input type="text" value={editSubdistrict} onChange={e => setEditSubdistrict(e.target.value)} className="input" style={{ width: '100%' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 6 }}>อำเภอ / เขต</label>
+                        <input type="text" value={editDistrict} onChange={e => setEditDistrict(e.target.value)} className="input" style={{ width: '100%' }} />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 6 }}>จังหวัด</label>
+                        <input type="text" value={editProvince} onChange={e => setEditProvince(e.target.value)} className="input" style={{ width: '100%' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 6 }}>รหัสไปรษณีย์</label>
+                        <input type="text" value={editZipcode} onChange={e => setEditZipcode(e.target.value)} className="input" style={{ width: '100%', letterSpacing: 1 }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, color: 'var(--gray-text)', textTransform: 'uppercase', marginBottom: 8 }}>📝 หมายเหตุส่วนตัว (แอดมินเท่านั้น)</label>
+                    <textarea value={editNote} onChange={e => setEditNote(e.target.value)} placeholder="กรอกโน้ตเกี่ยวกับลูกค้า..." className="input" rows={3} style={{ width: '100%', resize: 'none' }} />
+                  </div>
+                </div>
+
+                {/* Auto Calculator Tags Logic */}
+                <div style={{ background: 'rgba(201, 169, 110, 0.05)', border: '1px solid var(--gold-dark)', borderRadius: 12, padding: 24 }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--gold-primary)', marginBottom: 20 }}>🏷️ ตั้งค่าส่วนลดบุคคล (Auto Pricing)</h3>
+                  
+                  <div style={{ marginBottom: 20 }}>
+                    <label style={{ display: 'block', fontSize: 12, color: 'var(--gray-text)', textTransform: 'uppercase', marginBottom: 8 }}>เลือกระดับลูกค้า (Tier)</label>
+                    <select className="input" value={tierTag} onChange={e => setTierTag(e.target.value)} style={{ width: '100%' }}>
+                      <option value="NORMAL">ลูกค้าระดับทั่วไป (ราคา Retail)</option>
+                      {availableTiers.filter(t => t.name !== 'NORMAL').map(t => (
+                        <option key={t.id} value={t.name}>{t.name} (ลด {t.discount_percent}%)</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ marginBottom: 20 }}>
+                    <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: 'var(--gray-text)', textTransform: 'uppercase', marginBottom: 8 }}>
+                      <span>ระบุส่วนลดรายสินค้า (ลดเพิ่มเป็นเงินบาท)</span>
+                      <button onClick={addProductDiscount} className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: 11, borderColor: 'var(--gold-dark)', color: 'var(--gold-primary)' }}>+ เพิ่ม</button>
+                    </label>
+                    
+                    {productDiscounts.length === 0 ? (
+                      <div style={{ fontSize: 12, color: 'var(--gray-text)', fontStyle: 'italic' }}>ไม่ได้ระบุส่วนลดเจาะจงสินค้า</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {productDiscounts.map((pd, i) => (
+                          <div key={i} style={{ display: 'flex', gap: 8 }}>
+                            <select className="input" value={pd.sku} onChange={e => updateProductDiscount(i, 'sku', e.target.value)} style={{ flex: 1, padding: '6px 10px' }}>
+                              {products.map(p => <option key={p.id} value={p.sku}>[{p.sku}]</option>)}
+                            </select>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span style={{ color: 'var(--danger)' }}>-</span>
+                              <input type="number" className="input" value={pd.amount || ''} onChange={e => updateProductDiscount(i, 'amount', parseInt(e.target.value)||0)} placeholder="บาท" style={{ width: 80, padding: '6px 10px', textAlign: 'right' }} />
+                              <button onClick={() => removeProductDiscount(i)} style={{ background: 'transparent', border: 'none', color: 'var(--gray-text)', cursor: 'pointer', outline: 'none' }}>✖</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, color: 'var(--gray-text)', textTransform: 'uppercase', marginBottom: 8 }}>แท็กทั่วไปอื่นๆ</label>
+                    <input type="text" value={editTags} onChange={e => setEditTags(e.target.value)} placeholder="เช่น ลูกค้าทักซ้ำ, เรื่องมาก..." className="input" style={{ width: '100%', marginBottom: 10 }} />
+                    
+                    {/* Tag Suggestions from DB */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {availableTags.map(tag => {
+                        const isActive = editTags.split(',').map(t => t.trim()).includes(tag.name)
+                        return (
+                          <button
+                            key={tag.id}
+                            onClick={() => toggleGeneralTag(tag.name)}
+                            style={{
+                              fontSize: 10,
+                              padding: '4px 10px',
+                              borderRadius: 12,
+                              cursor: 'pointer',
+                              border: `1px solid ${isActive ? tag.color : 'var(--gray-border)'}`,
+                              background: isActive ? `${tag.color}22` : 'transparent',
+                              color: isActive ? tag.color : 'var(--gray-text)',
+                              fontWeight: isActive ? 700 : 400,
+                              transition: 'all 0.15s',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4
+                            }}
+                          >
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: tag.color }} />
+                            {tag.name}
+                            {isActive && <span>✓</span>}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Order History Table */}
+              <div>
+                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  📦 ประวัติสั่งซื้อล่าสุด ({customerOrders.length})
+                </h3>
+                
+                <div style={{ background: 'var(--black-deep)', border: '1px solid var(--gray-border)', borderRadius: 12, overflow: 'hidden' }}>
+                  {ordersLoading ? (
+                    <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-text)' }}>โหลดประวัติออร์เดอร์...</div>
+                  ) : customerOrders.length === 0 ? (
+                    <div style={{ padding: 32, textAlign: 'center', color: 'var(--gray-text)' }}>ยังไม่เคยมีการสั่งซื้อ</div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--gray-border)' }}>
+                        <tr>
+                          <th style={{ padding: '12px 20px', textAlign: 'left', fontSize: 12, color: 'var(--gray-text)', fontWeight: 600 }}>บิลเลขที่</th>
+                          <th style={{ padding: '12px 20px', textAlign: 'left', fontSize: 12, color: 'var(--gray-text)', fontWeight: 600 }}>วันที่</th>
+                          <th style={{ padding: '12px 20px', textAlign: 'left', fontSize: 12, color: 'var(--gray-text)', fontWeight: 600 }}>สถานะ</th>
+                          <th style={{ padding: '12px 20px', textAlign: 'left', fontSize: 12, color: 'var(--gray-text)', fontWeight: 600 }}>สินค้า</th>
+                          <th style={{ padding: '12px 20px', textAlign: 'right', fontSize: 12, color: 'var(--gray-text)', fontWeight: 600 }}>ยอดรวม</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {customerOrders.map(order => (
+                          <tr key={order.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                            <td style={{ padding: '14px 20px', fontWeight: 600 }}>#{order.id}</td>
+                            <td style={{ padding: '14px 20px', fontSize: 13, color: 'var(--gray-text)' }}>
+                              {order.order_date ? new Date(order.order_date).toLocaleDateString('th-TH') : '—'}
+                            </td>
+                            <td style={{ padding: '14px 20px' }}>
+                              <span className={`badge ${STATUS_BADGE[order.status] || 'badge-gray'}`}>
+                                {STATUS_LABELS[order.status] || order.status}
+                              </span>
+                            </td>
+                            <td style={{ padding: '14px 20px', fontSize: 12, color: 'var(--gray-text)', maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {order.items_summary}
+                            </td>
+                            <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 600, color: 'var(--gold-primary)' }}>
+                              {order.total.toLocaleString()} ฿
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+
+            </div>
+          ) : (
+            <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--gray-text)' }}>
+              <div style={{ fontSize: 64, marginBottom: 16 }}>👤</div>
+              <h2>เลือกรายชื่อลูกค้าจากเมนูด้านซ้าย</h2>
+              <p>เพื่อดูข้อมูลและตั้งค่าส่วนลดเฉพาะบุคคล</p>
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
+  )
+}

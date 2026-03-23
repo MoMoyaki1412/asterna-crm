@@ -1,0 +1,18 @@
+<svg width="400" height="100" viewBox="0 0 400 100" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .logo-text {
+      font-family: "Playfair Display", "Times New Roman", "Georgia", serif;
+      font-size: 64px;
+      font-weight: 400;
+      fill: #000;
+      letter-spacing: 4px;
+    }
+  </style>
+  <text x="20" y="72" class="logo-text">ASTERNA</text>
+  
+  <!-- A beautiful delicate flower/sparkle accent near the end of the text -->
+  <g transform="translate(330, 40) scale(1.2)">
+    <path d="M10,0 C12,6 16,8 20,10 C16,12 12,14 10,20 C8,14 4,12 0,10 C4,8 8,6 10,0 Z" fill="#000" />
+    <path d="M10,4 L11.5,8.5 L16,10 L11.5,11.5 L10,16 L8.5,11.5 L4,10 L8.5,8.5 Z" fill="#fff" />
+  </g>
+</svg>

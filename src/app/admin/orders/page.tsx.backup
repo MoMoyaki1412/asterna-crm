@@ -1,0 +1,265 @@
+'use client'
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { supabase } from '@/lib/supabase'
+import { OrderDetailModal } from '@/components/OrderDetailModal'
+
+type Order = {
+  id: number
+  customer_name: string
+  order_date: string
+  status: string
+  total: number
+  items_summary: string
+  tracking: string
+  note: string
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  shipped: 'จัดส่งแล้ว',
+  pending: 'รอดำเนินการ',
+  completed: 'สำเร็จ',
+  cancelled: 'ยกเลิก',
+}
+
+const STATUS_BADGE: Record<string, string> = {
+  shipped: 'badge-green',
+  pending: 'badge-gold',
+  completed: 'badge-gray',
+  cancelled: 'badge-red',
+}
+
+export default function OrdersPage() {
+  const [orders, setOrders] = useState<Order[]>([])
+  const [filtered, setFiltered] = useState<Order[]>([])
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [loading, setLoading] = useState(true)
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
+
+  useEffect(() => {
+    async function load() {
+      const { data } = await supabase
+        .from('orders')
+        .select('*')
+        .order('order_date', { ascending: false })
+      if (data) {
+        setOrders(data)
+        setFiltered(data)
+      }
+      setLoading(false)
+    }
+    load()
+  }, [])
+
+  useEffect(() => {
+    const q = search.toLowerCase()
+    setFiltered(orders.filter(o => {
+      const matchSearch = o.customer_name?.toLowerCase().includes(q) ||
+        o.items_summary?.toLowerCase().includes(q) ||
+        o.tracking?.includes(q)
+      const matchStatus = statusFilter === 'all' || o.status === statusFilter
+      return matchSearch && matchStatus
+    }))
+  }, [search, statusFilter, orders])
+
+  const totalRevenue = filtered.reduce((s, o) => s + (o.total || 0), 0)
+
+  const deleteOrder = async (id: number) => {
+    const { error } = await supabase.from('orders').delete().eq('id', id)
+    if (!error) {
+      setOrders(prev => prev.filter(o => o.id !== id))
+      setFiltered(prev => prev.filter(o => o.id !== id))
+      setConfirmDeleteId(null)
+    } else {
+      alert('❌ ลบออร์เดอร์ไม่สำเร็จ: ' + error.message)
+      setConfirmDeleteId(null)
+    }
+  }
+
+  const updateOrderStatus = async (id: number, newStatus: string) => {
+    const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', id)
+    if (!error) {
+      setOrders(orders.map(o => o.id === id ? { ...o, status: newStatus } : o))
+      setFiltered(filtered.map(o => o.id === id ? { ...o, status: newStatus } : o))
+    } else {
+      alert('❌ อัปเดตสถานะไม่สำเร็จ: ' + error.message)
+    }
+  }
+
+  return (
+    <>
+      <div className="topbar">
+        <span className="topbar-title">📦 คำสั่งซื้อ</span>
+        <div className="topbar-user" style={{ display: 'flex', gap: 16 }}>
+          <Link href="/admin/orders/create" className="btn btn-primary">
+            + เปิดบิลใหม่
+          </Link>
+          <div className="avatar">A</div>
+        </div>
+      </div>
+      <div className="page-body animate-in">
+        <div className="section-header">
+          <div>
+            <h2 className="section-title">รายการคำสั่งซื้อ</h2>
+            <p className="section-sub">
+              แสดง {filtered.length} รายการ · รวม {totalRevenue.toLocaleString()} ฿
+            </p>
+          </div>
+        </div>
+
+        <div className="search-wrap" style={{ flexWrap: 'wrap', gap: 10 }}>
+          <input
+            type="search"
+            placeholder="🔍 ค้นหาชื่อลูกค้า สินค้า หรือ Tracking..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ maxWidth: 360 }}
+          />
+          {(['all', 'shipped', 'pending', 'completed', 'cancelled'] as const).map(s => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`btn ${statusFilter === s ? 'btn-primary' : 'btn-ghost'}`}
+              style={{ padding: '8px 14px', fontSize: 12 }}
+            >
+              {s === 'all' ? 'ทั้งหมด' : STATUS_LABELS[s]}
+            </button>
+          ))}
+        </div>
+
+        <div className="card">
+          <div className="card-body table-wrap">
+            {loading ? (
+              <div className="empty-state"><p>⏳ กำลังโหลด...</p></div>
+            ) : filtered.length === 0 ? (
+              <div className="empty-state">
+                <div className="emoji">📭</div>
+                <p>ไม่พบออร์เดอร์ที่ตรงกัน</p>
+              </div>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>วันที่</th>
+                    <th>ลูกค้า</th>
+                    <th>สินค้า</th>
+                    <th>ยอดรวม</th>
+                    <th>สถานะ</th>
+                    <th>Tracking</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(o => (
+                    <tr key={o.id} onClick={(e) => {
+                      const tag = (e.target as HTMLElement).tagName.toLowerCase()
+                      if (tag === 'select' || tag === 'option' || tag === 'button') return
+                      if (confirmDeleteId === o.id) return
+                      setSelectedOrderId(o.id)
+                    }} style={{ cursor: 'pointer' }}>
+                      <td style={{ fontSize: 12, color: 'var(--gray-text)', whiteSpace: 'nowrap' }}>
+                        {o.order_date ? new Date(o.order_date).toLocaleDateString('th-TH') : '—'}
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{o.customer_name}</td>
+                      <td style={{ fontSize: 12, color: 'var(--gray-text)', maxWidth: 200 }}>
+                        {o.items_summary || '—'}
+                      </td>
+                      <td style={{ color: 'var(--gold-primary)', fontWeight: 700 }}>
+                        {(o.total || 0).toLocaleString()} ฿
+                      </td>
+                      <td>
+                        <select
+                          value={o.status}
+                          onChange={(e) => updateOrderStatus(o.id, e.target.value)}
+                          className={`badge ${STATUS_BADGE[o.status] || 'badge-gray'}`}
+                          style={{ outline: 'none', cursor: 'pointer', appearance: 'auto', paddingRight: '4px', border: 'none', fontWeight: 600 }}
+                        >
+                          <option value="pending" style={{ color: '#000', background: '#fff' }}>รอดำเนินการ</option>
+                          <option value="shipped" style={{ color: '#000', background: '#fff' }}>จัดส่งแล้ว</option>
+                          <option value="completed" style={{ color: '#000', background: '#fff' }}>สำเร็จ</option>
+                          <option value="cancelled" style={{ color: '#000', background: '#fff' }}>ยกเลิก</option>
+                        </select>
+                      </td>
+                      <td style={{ fontSize: 12, color: 'var(--gray-text)' }}>
+                        {o.tracking || '—'}
+                      </td>
+                      <td onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
+                        {confirmDeleteId === o.id ? (
+                          <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                            <button
+                              onClick={() => deleteOrder(o.id)}
+                              style={{
+                                background: '#e53e3e',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: 6,
+                                padding: '4px 10px',
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              ยืนยันลบ
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteId(null)}
+                              style={{
+                                background: 'none',
+                                border: '1px solid var(--border)',
+                                borderRadius: 6,
+                                padding: '4px 8px',
+                                fontSize: 12,
+                                cursor: 'pointer',
+                                color: 'var(--gray-text)',
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmDeleteId(o.id)}
+                            title="ลบออร์เดอร์"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontSize: 16,
+                              color: '#e53e3e',
+                              padding: '4px 8px',
+                              borderRadius: 6,
+                              transition: 'background 0.15s',
+                            }}
+                            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(229,62,62,0.12)')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {selectedOrderId && (
+        <OrderDetailModal orderId={selectedOrderId} onClose={() => {
+          setSelectedOrderId(null);
+          // Optional: re-fetch tracking or orders to update the list view
+          supabase.from('orders').select('*').order('order_date', { ascending: false }).then(({ data }) => {
+            if (data) {
+              setOrders(data);
+              // Simple re-apply filter effect won't run here unless we update search state, but we can just update orders.
+            }
+          });
+        }} />
+      )}
+    </>
+  )
+}

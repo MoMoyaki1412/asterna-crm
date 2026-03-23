@@ -1,0 +1,513 @@
+'use client'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+import { CustomerSelect, Customer } from '@/components/CustomerSelect'
+import { useAdminAuth } from '@/contexts/AdminAuthContext'
+
+type Product = {
+  id: number
+  name: string
+  sku: string
+  price_retail: number
+  price_dealer: number
+  price_online: number
+  stock_total: number
+  stock_reserved: number
+  stock_shipped: number
+  active_ingredients: string[]
+}
+
+type LineItem = {
+  product: Product
+  qty: number
+}
+
+type Campaign = {
+  id: number
+  name: string
+  discount_amount: number | null
+  discount_percent: number | null
+}
+
+type Coupon = {
+  id: number
+  code: string
+  name: string
+  discount_amount: number | null
+  discount_percent: number | null
+  max_uses: number | null
+  uses_count: number
+  expires_at: string | null
+  is_active: boolean
+}
+
+export default function CreateOrderPage() {
+  const router = useRouter()
+  const { profile } = useAdminAuth()
+  const [products, setProducts] = useState<Product[]>([])
+  const [tiers, setTiers] = useState<{ id: number; name: string; discount_percent: number; product_discounts?: {sku:string, amount:number}[] }[]>([])
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+
+  // Form State
+  const [customer, setCustomer] = useState<Customer | null>(null)
+  const [shippingAddress, setShippingAddress] = useState('')
+  const [lineItems, setLineItems] = useState<LineItem[]>([])
+  const [shippingCost, setShippingCost] = useState(0)
+  const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null)
+  const [couponCode, setCouponCode] = useState('')
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null)
+  const [couponStatus, setCouponStatus] = useState<{ok: boolean; msg: string} | null>(null)
+  const [couponLoading, setCouponLoading] = useState(false)
+  const [note, setNote] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    async function loadData() {
+      const [pRes, tRes, cRes] = await Promise.all([
+        supabase.from('products').select('*').order('id'),
+        supabase.from('customer_tiers').select('*'),
+        supabase.from('campaigns').select('*').eq('is_active', true).order('name')
+      ])
+      if (pRes.data) setProducts(pRes.data)
+      if (tRes.data) setTiers(tRes.data)
+      if (cRes.data) setCampaigns(cRes.data)
+    }
+    loadData()
+  }, [])
+
+  // Auto-fill shipping address when customer is selected
+  const handleSelectCustomer = (c: Customer | null) => {
+    setCustomer(c)
+    setShippingAddress(c?.address || '')
+  }
+
+  const addLineItem = () => {
+    if (products.length === 0) return
+    setLineItems([...lineItems, { product: products[0], qty: 1 }])
+  }
+
+  const removeLineItem = (index: number) => {
+    const list = [...lineItems]
+    list.splice(index, 1)
+    setLineItems(list)
+  }
+
+  const updateLineItem = (index: number, key: keyof LineItem, value: any) => {
+    const list = [...lineItems]
+    list[index] = { ...list[index], [key]: value }
+    setLineItems(list)
+  }
+
+  // --- Auto Pricing Logic --- //
+  const getLineItemPricing = (item: LineItem) => {
+    let basePrice = item.product.price_retail || 0
+    let autoDiscount = 0
+    let discountReason = ''
+    
+    if (customer && customer.tags) {
+      const tags = customer.tags.split(',').map(s=>s.trim())
+      
+      // Tier Discount
+      const tierTagMatch = tags.find(tag => tiers.some(t => t.name === tag))
+      if (tierTagMatch) {
+        const matchedTier = tiers.find(t => t.name === tierTagMatch)
+        if (matchedTier) {
+          if (matchedTier.name.toUpperCase().includes('DEALER')) {
+            if (item.product.price_dealer && item.product.price_dealer < basePrice) {
+              autoDiscount += (basePrice - item.product.price_dealer)
+              discountReason = `${matchedTier.name} (ราคาส่ง)`
+            }
+          } else if (matchedTier.discount_percent > 0) {
+            autoDiscount += (basePrice * (matchedTier.discount_percent / 100))
+            discountReason = `${matchedTier.name} (-${matchedTier.discount_percent}%)`
+          } else if (matchedTier.product_discounts && matchedTier.product_discounts.length > 0) {
+            const productDisc = matchedTier.product_discounts.find((pd: any) => pd.sku === item.product.sku)
+            if (productDisc && productDisc.amount > 0) {
+              autoDiscount += productDisc.amount
+              discountReason = `${matchedTier.name} (ลด ${productDisc.amount}฿)`
+            }
+          }
+        }
+      }
+      
+      // SKU Specific Discount
+      const skuDiscTag = tags.find(t => t.startsWith(`DISC_${item.product.sku}:-`))
+      if (skuDiscTag) {
+        const amt = parseInt(skuDiscTag.split(':-')[1]) || 0
+        autoDiscount += amt
+        discountReason += discountReason ? ` + SKUลด${amt}` : `SKUลด${amt}`
+      }
+    }
+    
+    const finalPrice = Math.max(0, basePrice - autoDiscount)
+    return {
+      basePrice,
+      autoDiscount,
+      discountReason,
+      finalPrice,
+      total: finalPrice * item.qty
+    }
+  }
+
+  const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId) || null
+  const subtotal = lineItems.reduce((acc, item) => acc + getLineItemPricing(item).total, 0)
+  const campaignDiscount = selectedCampaign
+    ? (selectedCampaign.discount_amount || 0) + (selectedCampaign.discount_percent ? Math.round(subtotal * selectedCampaign.discount_percent / 100) : 0)
+    : 0
+  const couponDiscount = appliedCoupon
+    ? (appliedCoupon.discount_amount || 0) + (appliedCoupon.discount_percent ? Math.round(subtotal * appliedCoupon.discount_percent / 100) : 0)
+    : 0
+  const totalDiscount = campaignDiscount + couponDiscount
+  const grandTotal = subtotal + shippingCost - totalDiscount
+
+  const handleApplyCoupon = async () => {
+    if (!couponCode.trim()) return
+    setCouponLoading(true)
+    setCouponStatus(null)
+    setAppliedCoupon(null)
+
+    const { data, error } = await supabase
+      .from('coupons')
+      .select('*')
+      .eq('code', couponCode.trim().toUpperCase())
+      .single()
+
+    if (error || !data) {
+      setCouponStatus({ ok: false, msg: 'ไม่พบรหัสคูปองนี้' })
+    } else if (!data.is_active) {
+      setCouponStatus({ ok: false, msg: 'คูปองนี้ถูกปิดการใช้งานแล้ว' })
+    } else if (data.expires_at && new Date(data.expires_at) < new Date()) {
+      setCouponStatus({ ok: false, msg: 'คูปองนี้หมดอายุแล้ว' })
+    } else if (data.max_uses !== null && data.uses_count >= data.max_uses) {
+      setCouponStatus({ ok: false, msg: 'คูปองนี้ถูกใช้ครบโควต้าแล้ว' })
+    } else {
+      setAppliedCoupon(data)
+      const parts: string[] = []
+      if (data.discount_amount) parts.push(`${data.discount_amount} ฿`)
+      if (data.discount_percent) parts.push(`${data.discount_percent}%`)
+      setCouponStatus({ ok: true, msg: `✓ ${data.name} — ลด ${parts.join(' + ')}` })
+    }
+    setCouponLoading(false)
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!customer) return alert('กรุณาเลือกลูกค้า')
+    if (lineItems.length === 0) return alert('กรุณาเลือกสินค้าอย่างน้อย 1 รายการ')
+    if (grandTotal < 0) return alert('ยอดรวมติดลบไม่ได้')
+
+    setLoading(true)
+
+    try {
+      const itemsSummary = lineItems.map(item => `${item.product.name} x${item.qty}`).join(', ')
+
+      const { data: orderData, error: orderErr } = await supabase.from('orders').insert({
+        customer_id: customer.id,
+        customer_name: customer.name,
+        order_date: new Date().toISOString(),
+        status: 'pending',
+        total: grandTotal,
+        shipping_cost: shippingCost,
+        discount: totalDiscount,
+        campaign_id: selectedCampaignId,
+        coupon_id: appliedCoupon?.id || null,
+        shipping_address: shippingAddress.trim() || null,
+        items_summary: itemsSummary,
+        note: note,
+        source: 'Asterna CRM (Manual)',
+      }).select().single()
+
+      if (orderErr) throw orderErr
+
+      // Insert Order Items with Computed Final Price
+      const orderItems = lineItems.map(item => ({
+        order_id: orderData.id,
+        product_id: item.product.id,
+        qty: item.qty,
+        price_at_time: getLineItemPricing(item).finalPrice
+      }))
+      
+      const { error: itemsErr } = await supabase.from('order_items').insert(orderItems)
+      if (itemsErr) console.error('Error inserting items:', itemsErr)
+
+      // Update customer total_orders AND sync shipping address if changed
+      const customerUpdates: Record<string, any> = {
+        total_orders: (customer.total_orders || 0) + 1
+      }
+      const trimmedAddr = shippingAddress.trim()
+      if (trimmedAddr && trimmedAddr !== (customer.address || '').trim()) {
+        customerUpdates.address = trimmedAddr
+      }
+      await supabase.from('customers').update(customerUpdates).eq('id', customer.id)
+
+      // Increment coupon uses_count
+      if (appliedCoupon) {
+        await supabase.from('coupons').update({ uses_count: appliedCoupon.uses_count + 1 }).eq('id', appliedCoupon.id)
+      }
+
+      alert('✅ เปิดบิลสำเร็จ!')
+      router.push('/admin/orders')
+      
+    } catch (err: any) {
+      alert('❌ เกิดข้อผิดพลาด: ' + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="topbar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+          <button onClick={() => router.back()} className="btn btn-ghost" style={{ padding: '6px 12px' }}>
+            ← กลับ
+          </button>
+          <span className="topbar-title">🧾 สร้างบิล/คำสั่งซื้อใหม่</span>
+        </div>
+      </div>
+      
+      <div className="page-body animate-in" style={{ maxWidth: 1000 }}>
+        <form onSubmit={handleSubmit} className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 32 }}>
+          
+          {/* Section 1: Customer */}
+          <section>
+            <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ background: 'var(--gold-light)', color: 'var(--gold-dark)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>1</span> 
+              ข้อมูลลูกค้า {customer && customer.tags && <span style={{ fontSize: 12, fontWeight: 400, background: 'var(--gold-dark)', color: '#fff', padding: '2px 8px', borderRadius: 4, marginLeft: 8 }}>ลูกค้าท่านนี้ตั้งค่า Autoprice ไว้ ระบบจะปรับราคาให้อัตโนมัติ</span>}
+            </h3>
+            <div style={{ padding: 20, background: 'var(--black-card)', border: '1px solid var(--gray-border)', borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <CustomerSelect onSelect={handleSelectCustomer} />
+
+              {/* Shipping Address */}
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--gray-text)' }}>
+                  📍 ชื่อ-ที่อยู่สำหรับจัดส่ง
+                  {customer && customer.address && shippingAddress === customer.address && (
+                    <span style={{ marginLeft: 8, fontSize: 11, background: 'rgba(76,175,118,0.15)', color: 'var(--success)', padding: '2px 8px', borderRadius: 4 }}>
+                      ✓ โหลดจากข้อมูลลูกค้าอัตโนมัติ
+                    </span>
+                  )}
+                </label>
+                <textarea
+                  className="input"
+                  rows={3}
+                  placeholder="ชื่อผู้รับ / บ้านเลขที่ / ถนน / ตำบล / อำเภอ / จังหวัด / รหัสไปรษณีย์..."
+                  value={shippingAddress}
+                  onChange={e => setShippingAddress(e.target.value)}
+                  style={{ width: '100%', resize: 'vertical', fontSize: 13 }}
+                />
+                {customer && shippingAddress.trim() && shippingAddress.trim() !== (customer.address || '').trim() && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: 'var(--gold-primary)' }}>
+                    ⚠️ ที่อยู่ต่างจากที่บันทึกไว้ — ระบบจะอัปเดตที่อยู่ลูกค้าให้อัตโนมัติเมื่อกดยืนยันบิล
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {/* Section 2: Products */}
+          <section>
+            <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ background: 'var(--gold-light)', color: 'var(--gold-dark)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>2</span> 
+              รายการสินค้า
+            </h3>
+            
+            <div style={{ border: '1px solid var(--gray-border)', borderRadius: 12, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead style={{ background: 'var(--black-card)', fontSize: 12, color: 'var(--gray-text)' }}>
+                  <tr>
+                    <th style={{ padding: '12px 16px', textAlign: 'left' }}>สินค้า</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'right', width: 90 }}>ราคาฐาน</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', width: 140 }}>ส่วนลดส่วนตัว</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'right', width: 100 }}>ราคาหักลบ</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', width: 90 }}>จำนวน</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'right', width: 120 }}>รวม</th>
+                    <th style={{ padding: '12px 16px', width: 60 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lineItems.map((item, index) => {
+                    const pricing = getLineItemPricing(item)
+                    return (
+                      <tr key={index} style={{ borderTop: '1px solid var(--gray-border)' }}>
+                        <td style={{ padding: '12px 16px' }}>
+                          <select 
+                            className="input"
+                            value={item.product.id}
+                            onChange={e => {
+                              const p = products.find(p => p.id === parseInt(e.target.value))
+                              if (p) updateLineItem(index, 'product', p)
+                            }}
+                            style={{ width: '100%', padding: '8px 12px' }}
+                          >
+                            {products.map(p => (
+                              <option key={p.id} value={p.id}>[{p.sku}] {p.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', color: 'var(--gray-text)', textDecoration: pricing.autoDiscount > 0 ? 'line-through' : 'none' }}>
+                          {pricing.basePrice.toLocaleString()} ฿
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                          {pricing.autoDiscount > 0 || pricing.discountReason ? (
+                            <div style={{ background: 'rgba(224, 85, 85, 0.15)', color: 'var(--danger)', padding: '4px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600 }}>
+                              -{pricing.autoDiscount} ฿<br/>
+                              <span style={{ fontSize: 9, opacity: 0.8 }}>({pricing.discountReason})</span>
+                            </div>
+                          ) : <span style={{ color: 'var(--gray-text)' }}>-</span>}
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
+                          {pricing.finalPrice.toLocaleString()} ฿
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <input 
+                            type="number" 
+                            className="input"
+                            min={1}
+                            value={item.qty}
+                            onChange={e => updateLineItem(index, 'qty', parseInt(e.target.value) || 1)}
+                            style={{ width: '100%', textAlign: 'center', padding: '8px' }}
+                          />
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--gold-primary)' }}>
+                          {pricing.total.toLocaleString()} ฿
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                          <button type="button" onClick={() => removeLineItem(index)} className="btn btn-ghost" style={{ color: 'red', padding: '6px' }}>
+                            ✖
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {lineItems.length === 0 && (
+                    <tr style={{ borderTop: '1px solid var(--gray-border)' }}>
+                      <td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--gray-text)' }}>
+                        ยังไม่มีรายการสินค้า
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              <div style={{ padding: 12, borderTop: '1px solid var(--gray-border)', background: 'var(--black-card)' }}>
+                <button type="button" onClick={addLineItem} className="btn btn-ghost" style={{ color: 'var(--gold-dark)', fontWeight: 600 }}>
+                  + เพิ่มรายการสินค้า
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* Section 3: Note + Summary */}
+          <section style={{ display: 'flex', gap: 32, alignItems: 'flex-start' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 600, marginBottom: 8 }}>หมายเหตุการขาย</label>
+              <textarea 
+                className="input" 
+                rows={4} 
+                placeholder="โน้ตเพิ่มเติม (ถ้ามี)..."
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                style={{ width: '100%' }}
+              />
+            </div>
+            
+            <div style={{ width: 320, background: 'var(--black-card)', padding: 20, borderRadius: 12, border: '1px solid var(--gray-border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                <span style={{ color: 'var(--gray-text)' }}>ยอดรวมสินค้า</span>
+                <span>{subtotal.toLocaleString()} ฿</span>
+              </div>
+
+              {/* Campaign Discount */}
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ color: 'var(--gray-text)', fontSize: 13 }}>ส่วนลดแคมเปญ</span>
+                  {campaignDiscount > 0 && (
+                    <span style={{ color: 'var(--danger)', fontWeight: 700 }}>-{campaignDiscount.toLocaleString()} ฿</span>
+                  )}
+                </div>
+<select
+                  className="input"
+                  value={selectedCampaignId ?? ''}
+                  onChange={e => setSelectedCampaignId(e.target.value ? Number(e.target.value) : null)}
+                  style={{ width: '100%', padding: '8px 12px', fontSize: 13 }}
+                >
+                  <option value="">— ไม่ใช้แคมเปญ —</option>
+                  {campaigns.map(c => {
+                    const parts: string[] = []
+                    if (c.discount_amount) parts.push(`${c.discount_amount.toLocaleString()} บาท`)
+                    if (c.discount_percent) parts.push(`${c.discount_percent}%`)
+                    return (
+                      <option key={c.id} value={c.id}>
+                        {c.name} (ลด {parts.join(' + ')})
+                      </option>
+                    )
+                  })}
+                </select>
+              </div>
+
+              {/* Coupon Code */}
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ color: 'var(--gray-text)', fontSize: 13 }}>รหัสคูปอง</span>
+                  {couponDiscount > 0 && (
+                    <span style={{ color: 'var(--danger)', fontWeight: 700 }}>-{couponDiscount.toLocaleString()} ฿</span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="กรอกรหัสคูปอง..."
+                    value={couponCode}
+                    onChange={e => { setCouponCode(e.target.value.toUpperCase()); setAppliedCoupon(null); setCouponStatus(null) }}
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleApplyCoupon())}
+                    style={{ flex: 1, padding: '8px 12px', fontSize: 13, letterSpacing: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleApplyCoupon}
+                    disabled={couponLoading || !couponCode.trim()}
+                    className="btn btn-ghost"
+                    style={{ padding: '8px 12px', fontSize: 12, whiteSpace: 'nowrap', borderColor: 'var(--gold-dark)', color: 'var(--gold-primary)' }}
+                  >
+                    {couponLoading ? '...' : 'ใช้คูปอง'}
+                  </button>
+                </div>
+                {couponStatus && (
+                  <div style={{
+                    marginTop: 6, fontSize: 12, padding: '6px 10px', borderRadius: 6,
+                    background: couponStatus.ok ? 'rgba(76,175,118,0.12)' : 'rgba(231,76,60,0.12)',
+                    color: couponStatus.ok ? 'var(--success)' : '#e74c3c',
+                    fontWeight: 600
+                  }}>
+                    {couponStatus.msg}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, alignItems: 'center' }}>
+                <span style={{ color: 'var(--gray-text)' }}>ค่าจัดส่ง</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  +<input type="number" className="input" value={shippingCost} onChange={e => setShippingCost(Number(e.target.value))} style={{ width: 80, padding: '4px 8px', textAlign: 'right' }} /> ฿
+                </div>
+              </div>
+              
+              <div style={{ paddingTop: 16, borderTop: '2px dashed var(--gray-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 800, fontSize: 18 }}>
+                <span>ยอดสุทธิ</span>
+                <span style={{ color: 'var(--gold-primary)' }}>{grandTotal.toLocaleString()} ฿</span>
+              </div>
+            </div>
+          </section>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16, marginTop: 16, paddingTop: 24, borderTop: '1px solid #eee' }}>
+            <button type="button" onClick={() => router.back()} className="btn btn-ghost" disabled={loading}>ยกเลิก</button>
+            <button type="submit" className="btn btn-primary" disabled={loading} style={{ padding: '12px 24px', fontSize: 16 }}>
+              {loading ? '⏳ กำลังบันทึก...' : '✅ ยืนยันเปิดบิล'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </>
+  )
+}
