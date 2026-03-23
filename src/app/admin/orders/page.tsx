@@ -6,6 +6,7 @@ import { OrderDetailModal } from '@/components/OrderDetailModal'
 import { useAdminAuth } from '@/contexts/AdminAuthContext'
 import toast from 'react-hot-toast'
 import { logActivity } from '@/lib/logger'
+import { maskPhone, maskAddress } from '@/lib/security'
 
 type Order = {
   id: number
@@ -61,7 +62,7 @@ export default function OrdersPage() {
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
 
-  const { profile: myProfile } = useAdminAuth()
+  const { profile: myProfile, can } = useAdminAuth()
 
   const toggleSelectAll = () => {
     if (selectedIds.length === filtered.length) {
@@ -129,6 +130,10 @@ export default function OrdersPage() {
   const totalRevenue = filtered.reduce((s, o) => s + (o.total || 0), 0)
 
   const deleteOrder = async (id: number) => {
+    if (!can('delete_orders') && !can('manage_orders')) {
+      toast.error('คุณไม่มีสิทธิ์ลบออร์เดอร์')
+      return
+    }
     const { error } = await supabase.from('orders').delete().eq('id', id)
     if (!error) {
       logActivity(myProfile?.id || 'system', 'DELETE_ORDER', 'orders', id.toString())
@@ -166,12 +171,12 @@ export default function OrdersPage() {
         STATUS_LABELS[data.status] || data.status,
         data.tracking || '',
         data.bill_type === 'cf' ? 'ระบบ CF' : 'ปกติ',
-        (data.shipping_address || '').replace(/,/g, ' '),
-        (data.address_subdistrict || '').replace(/,/g, ' '),
-        (data.address_district || '').replace(/,/g, ' '),
-        (data.address_province || '').replace(/,/g, ' '),
-        data.address_zipcode || '',
-        data.receiver_phone || '',
+        can('view_full_pii') ? (data.shipping_address || '').replace(/,/g, ' ') : maskAddress(data.shipping_address),
+        can('view_full_pii') ? (data.address_subdistrict || '').replace(/,/g, ' ') : '(ซ่อนโดยระบบ)',
+        can('view_full_pii') ? (data.address_district || '').replace(/,/g, ' ') : '(ซ่อนโดยระบบ)',
+        can('view_full_pii') ? (data.address_province || '').replace(/,/g, ' ') : '(ซ่อนโดยระบบ)',
+        can('view_full_pii') ? data.address_zipcode || '' : '(ซ่อนโดยระบบ)',
+        can('view_full_pii') ? (data.receiver_phone || '') : maskPhone(data.receiver_phone),
         (data.note || '').replace(/\n/g, ' ').replace(/,/g, ' ')
       ]
     })
@@ -194,6 +199,10 @@ export default function OrdersPage() {
   }
 
   const updateOrderStatus = async (id: number, newStatus: string) => {
+    if (!can('manage_orders')) {
+      toast.error('คุณไม่มีสิทธิ์เปลี่ยนสถานะออร์เดอร์')
+      return
+    }
     const { error } = await supabase.from('orders').update({ 
       status: newStatus
     }).eq('id', id)

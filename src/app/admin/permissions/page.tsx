@@ -18,10 +18,13 @@ const PERMISSION_LIST: { id: Permission; label: string }[] = [
   { id: 'create_orders', label: 'สร้างออร์เดอร์' },
   { id: 'delete_orders', label: 'ลบ / ยกเลิกออร์เดอร์' },
   { id: 'view_customers', label: 'ดูลูกค้า' },
+  { id: 'view_full_pii', label: 'ดูเบอร์โทรและที่อยู่เต็ม (PII)' },
   { id: 'edit_customers', label: 'แก้ไขข้อมูลลูกค้า / แท็ก' },
   { id: 'view_conversations', label: 'Inbox / การสนทนา' },
+  { id: 'manage_orders', label: 'จัดการ/แก้ไขสถานะออร์เดอร์' },
   { id: 'manage_tags', label: 'จัดการแท็กและ Tier' },
-  { id: 'manage_permissions', label: 'จัดการสิทธิ์แอดมิน' },
+  { id: 'manage_permissions', label: 'จัดการสิทธิ์แอดมิน (Matrix / Roles)' },
+  { id: 'create_admins', label: 'สร้างและจัดการบัญชีแอดมิน' },
 ]
 
 type Role = {
@@ -409,12 +412,12 @@ export default function PermissionsPage() {
     return <div className="page-body animate-in" style={{ padding: 40, color: 'var(--gold-primary)' }}>⏳ กำลังโหลด...</div>
   }
 
-  if (!can('manage_permissions')) {
+  if (!can('manage_permissions') && !can('create_admins')) {
     return (
       <div className="page-body animate-in" style={{ padding: 60, textAlign: 'center' }}>
         <div style={{ fontSize: 64, marginBottom: 24 }}>🔒</div>
         <h2 style={{ fontSize: 24, fontWeight: 800, marginBottom: 12 }}>ไม่มีสิทธิ์เข้าถึง</h2>
-        <p style={{ color: 'var(--gray-text)', marginBottom: 24 }}>หน้านี้สำหรับ Owner เท่านั้น</p>
+        <p style={{ color: 'var(--gray-text)', marginBottom: 24 }}>หน้านี้สำหรับ Owner หรือผู้ที่มีสิทธิ์จัดการแอดมินเท่านั้น</p>
         <Link href="/admin" className="btn btn-primary">← กลับ Dashboard</Link>
       </div>
     )
@@ -437,73 +440,77 @@ export default function PermissionsPage() {
         </div>
 
         {/* Role Legend Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16, marginBottom: 32 }}>
-          {roles.map(r => (
-            <div 
-              key={r.id} 
-              onClick={() => r.id !== 'owner' && setEditingRole(r)}
-              style={{
-                background: r.bg || 'rgba(255,255,255,0.03)', border: `1px solid ${r.color}33`,
-                borderRadius: 12, padding: '20px 24px',
-                position: 'relative',
-                cursor: r.id === 'owner' ? 'default' : 'pointer',
-                transition: 'all 0.2s ease'
-              }}
-              className={r.id !== 'owner' ? 'role-card-hover' : ''}
-            >
-              {r.id !== 'owner' && (
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleDeleteRole(r.id) }}
-                  style={{
-                    position: 'absolute', top: 12, right: 12,
-                    background: 'rgba(255,255,255,0.05)', border: 'none',
-                    borderRadius: '50%', width: 28, height: 28,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    cursor: 'pointer', transition: 'all 0.2s', zIndex: 10
-                  }}
-                  className="delete-role-btn"
-                  title="ลบ Role"
-                >
-                  <span style={{ fontSize: 14 }}>🗑️</span>
-                </button>
-              )}
-              <div style={{ fontSize: 28, marginBottom: 8, height: 40, display: 'flex', alignItems: 'center' }}>
-                {r.icon.startsWith('http') || r.icon.startsWith('data:') ? (
-                  <img src={r.icon} alt={r.label} style={{ height: '100%', maxWidth: '100%', objectFit: 'contain' }} />
-                ) : (
-                  r.icon === 'crown' ? '👑' : r.icon
+        {can('manage_permissions') && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16, marginBottom: 32 }}>
+            {roles.map(r => (
+              <div 
+                key={r.id} 
+                onClick={() => r.id !== 'owner' && setEditingRole(r)}
+                style={{
+                  background: r.bg || 'rgba(255,255,255,0.03)', border: `1px solid ${r.color}33`,
+                  borderRadius: 12, padding: '20px 24px',
+                  position: 'relative',
+                  cursor: r.id === 'owner' ? 'default' : 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                className={r.id !== 'owner' ? 'role-card-hover' : ''}
+              >
+                {r.id !== 'owner' && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleDeleteRole(r.id) }}
+                    style={{
+                      position: 'absolute', top: 12, right: 12,
+                      background: 'rgba(255,255,255,0.05)', border: 'none',
+                      borderRadius: '50%', width: 28, height: 28,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', transition: 'all 0.2s', zIndex: 10
+                    }}
+                    className="delete-role-btn"
+                    title="ลบ Role"
+                  >
+                    <span style={{ fontSize: 14 }}>🗑️</span>
+                  </button>
                 )}
+                <div style={{ fontSize: 28, marginBottom: 8, height: 40, display: 'flex', alignItems: 'center' }}>
+                  {r.icon.startsWith('http') || r.icon.startsWith('data:') ? (
+                    <img src={r.icon} alt={r.label} style={{ height: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                  ) : (
+                    r.icon === 'crown' ? '👑' : r.icon
+                  )}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: r.color, marginBottom: 4 }}>{r.label}</div>
+                <div style={{ fontSize: 12, color: 'var(--gray-text)', lineHeight: 1.6 }}>{r.description}</div>
               </div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: r.color, marginBottom: 4 }}>{r.label}</div>
-              <div style={{ fontSize: 12, color: 'var(--gray-text)', lineHeight: 1.6 }}>{r.description}</div>
-            </div>
-          ))}
-          <button 
-            onClick={() => setShowCreateRole(true)}
-            style={{
-              background: 'transparent', border: '2px dashed var(--gray-border)',
-              borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer',
-              color: 'var(--gray-text)', transition: 'all 0.2s'
-            }}
-            className="hover-light"
-          >
-            <div style={{ fontSize: 24 }}>➕</div>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>เพิ่ม Role ใหม่</div>
-          </button>
-        </div>
+            ))}
+            <button 
+              onClick={() => setShowCreateRole(true)}
+              style={{
+                background: 'transparent', border: '2px dashed var(--gray-border)',
+                borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer',
+                color: 'var(--gray-text)', transition: 'all 0.2s'
+              }}
+              className="hover-light"
+            >
+              <div style={{ fontSize: 24 }}>➕</div>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>เพิ่ม Role ใหม่</div>
+            </button>
+          </div>
+        )}
 
         {/* Admin List */}
         <div className="card" style={{ padding: 0, marginBottom: 32, overflow: 'hidden' }}>
           <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--gray-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ fontSize: 16, fontWeight: 800 }}>👥 รายชื่อแอดมินทั้งหมด ({admins.length} คน)</h3>
-            <button
-              onClick={() => { setShowCreateAdmin(true); setError('') }}
-              className="btn btn-primary"
-              style={{ padding: '8px 18px', fontSize: 13 }}
-            >
-              + สร้าง Admin ใหม่
-            </button>
+            {can('create_admins') && (
+              <button
+                onClick={() => { setShowCreateAdmin(true); setError('') }}
+                className="btn btn-primary"
+                style={{ padding: '8px 18px', fontSize: 13 }}
+              >
+                + สร้าง Admin ใหม่
+              </button>
+            )}
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead style={{ background: 'rgba(0,0,0,0.2)' }}>
@@ -560,8 +567,10 @@ export default function PermissionsPage() {
                       )}
                     </td>
                     <td style={{ padding: '16px 24px', textAlign: 'center' }}>
-                      {isSelf ? (
-                        <span style={{ fontSize: 12, color: 'var(--gray-text)' }}>—</span>
+                      {isSelf || !can('manage_permissions') || (admin.role === 'owner' && myProfile?.role !== 'owner') ? (
+                        <span style={{ fontSize: 12, color: 'var(--gray-text)' }}>
+                          {isSelf && admin.role === 'owner' ? '👑 Owner' : (roleConf?.label || '—')}
+                        </span>
                       ) : (
                         <select 
                           value={admin.role || ''}
@@ -573,11 +582,13 @@ export default function PermissionsPage() {
                             outline: 'none', cursor: 'pointer'
                           }}
                         >
-                          {roles.map(r => (
-                            <option key={r.id} value={r.id} style={{ background: '#1a1a1a', color: 'white' }}>
-                              {r.label}
-                            </option>
-                          ))}
+                          {roles
+                            .filter(r => r.id !== 'owner' || myProfile?.role === 'owner') // Non-owners cannot change anyone TO owner
+                            .map(r => (
+                              <option key={r.id} value={r.id} style={{ background: '#1a1a1a', color: 'white' }}>
+                                {r.label}
+                              </option>
+                            ))}
                         </select>
                       )}
                     </td>
@@ -586,7 +597,7 @@ export default function PermissionsPage() {
                         <span style={{ color: '#2ecc71', fontWeight: 700 }}>✅</span>
                       ) : saving === admin.id ? (
                         <span style={{ color: 'var(--gray-text)' }}>⏳</span>
-                      ) : !isSelf ? (
+                      ) : (!isSelf && can('create_admins') && (admin.role !== 'owner' || myProfile?.role === 'owner')) ? (
                         confirmDeleteAdminId === admin.id ? (
                           <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
                             <button onClick={() => handleDeleteAdmin(admin.id)} disabled={deleting === admin.id} style={{ padding: '4px 8px', borderRadius: 6, border: 'none', background: '#e74c3c', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer', opacity: deleting === admin.id ? 0.5 : 1 }}>
@@ -621,54 +632,56 @@ export default function PermissionsPage() {
         </div>
 
         {/* Permission Matrix */}
-        <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-          <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--gray-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ fontSize: 16, fontWeight: 800 }}>📋 ตารางสิทธิ์แยกตาม Role</h3>
-            <span style={{ fontSize: 12, color: 'var(--gray-text)' }}>⚠️ เฉพาะ Role ที่ต่ำกว่า Owner สามารถแก้ไขได้</span>
-          </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 600 }}>
-            <thead style={{ background: 'rgba(0,0,0,0.2)' }}>
-              <tr>
-                <th style={{ padding: '12px 24px', textAlign: 'left', fontSize: 12, color: 'var(--gray-text)', fontWeight: 500 }}>ฟังก์ชั่น</th>
-                {roles.map(r => (
-                  <th key={r.id} style={{ padding: '12px 24px', textAlign: 'center', fontSize: 12, color: r.color, fontWeight: 700, width: 120 }}>
-                    {r.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {PERMISSION_LIST.map((row) => (
-                <tr key={row.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }} className="hover-light">
-                  <td style={{ padding: '16px 24px', fontSize: 13, fontWeight: 500 }}>{row.label}</td>
-                  {roles.map(r => {
-                    const isEnabled = rolePerms[r.id]?.includes(row.id)
-                    const isOwner = r.id === 'owner'
-                    
-                    return (
-                      <td key={r.id} style={{ padding: '12px 24px', textAlign: 'center' }}>
-                        {isOwner ? (
-                          <span style={{ fontSize: 16 }}>✅</span>
-                        ) : (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <label className="switch">
-                              <input 
-                                type="checkbox" 
-                                checked={isEnabled} 
-                                onChange={() => togglePermission(r.id, row.id)}
-                              />
-                              <span className="slider round"></span>
-                            </label>
-                          </div>
-                        )}
-                      </td>
-                    )
-                  })}
+        {can('manage_permissions') && (
+          <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--gray-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: 16, fontWeight: 800 }}>📋 ตารางสิทธิ์แยกตาม Role</h3>
+              <span style={{ fontSize: 12, color: 'var(--gray-text)' }}>⚠️ เฉพาะ Role ที่ต่ำกว่า Owner สามารถแก้ไขได้</span>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 600 }}>
+              <thead style={{ background: 'rgba(0,0,0,0.2)' }}>
+                <tr>
+                  <th style={{ padding: '12px 24px', textAlign: 'left', fontSize: 12, color: 'var(--gray-text)', fontWeight: 500 }}>ฟังก์ชั่น</th>
+                  {roles.map(r => (
+                    <th key={r.id} style={{ padding: '12px 24px', textAlign: 'center', fontSize: 12, color: r.color, fontWeight: 700, width: 120 }}>
+                      {r.label}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {PERMISSION_LIST.map((row) => (
+                  <tr key={row.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }} className="hover-light">
+                    <td style={{ padding: '16px 24px', fontSize: 13, fontWeight: 500 }}>{row.label}</td>
+                    {roles.map(r => {
+                      const isEnabled = rolePerms[r.id]?.includes(row.id)
+                      const isOwner = r.id === 'owner'
+                      
+                      return (
+                        <td key={r.id} style={{ padding: '12px 24px', textAlign: 'center' }}>
+                          {isOwner ? (
+                            <span style={{ fontSize: 16 }}>✅</span>
+                          ) : (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <label className="switch">
+                                <input 
+                                  type="checkbox" 
+                                  checked={isEnabled} 
+                                  onChange={() => togglePermission(r.id, row.id)}
+                                />
+                                <span className="slider round"></span>
+                              </label>
+                            </div>
+                          )}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
       {/* ===== CREATE ROLE MODAL ===== */}
       {showCreateRole && (
@@ -800,11 +813,13 @@ export default function PermissionsPage() {
                   onChange={e => setCreateAdminForm({ ...createAdminForm, role: e.target.value })}
                   style={{ color: 'white' }}
                 >
-                  {roles.map(r => (
-                    <option key={r.id} value={r.id} style={{ background: '#1a1a1a', color: 'white' }}>
-                      {r.label}
-                    </option>
-                  ))}
+                  {roles
+                    .filter(r => r.id !== 'owner' || myProfile?.role === 'owner') // Non-owners cannot create owners
+                    .map(r => (
+                      <option key={r.id} value={r.id} style={{ background: '#1a1a1a', color: 'white' }}>
+                        {r.label}
+                      </option>
+                    ))}
                 </select>
               </div>
             </div>

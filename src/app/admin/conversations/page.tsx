@@ -4,6 +4,8 @@ import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAdminAuth } from '@/contexts/AdminAuthContext'
 import toast from 'react-hot-toast'
+import { maskPhone, maskAddress } from '@/lib/security'
+import { logActivity } from '@/lib/logger'
 
 type Customer = {
   id: number
@@ -153,6 +155,10 @@ function ConversationsPageContent() {
   })
   const [unreadCount, setUnreadCount] = useState<Record<number, number>>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  
+  const { can } = useAdminAuth()
+  const [revealedPhoneIds, setRevealedPhoneIds] = useState<Set<number>>(new Set())
+  const [revealedAddressIds, setRevealedAddressIds] = useState<Set<number>>(new Set())
 
   const [tierTag, setTierTag] = useState('NORMAL')
   const [generalTags, setGeneralTags] = useState('')
@@ -518,7 +524,9 @@ function ConversationsPageContent() {
                         )}
                       </div>
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--gray-text)', marginTop: 2 }}>{c.phone || 'ไม่ระบุเบอร์'}</div>
+                    <div style={{ fontSize: 11, color: 'var(--gray-text)', marginTop: 2 }}>
+                      {(!can('view_full_pii') && !revealedPhoneIds.has(c.id)) ? maskPhone(c.phone) : (c.phone || 'ไม่ระบุเบอร์')}
+                    </div>
                     {hasAnyTags && (
                       <div style={{ display: 'flex', gap: 3, marginTop: 4, flexWrap: 'wrap' }}>
                         {[...skinActive, ...interestActive].map(t => (
@@ -549,7 +557,9 @@ function ConversationsPageContent() {
               <div style={{ padding: '12px 20px', background: '#fff', borderBottom: '1px solid #e0e0e0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                 <div>
                   <div style={{ fontWeight: 800, fontSize: 17, color: '#2c3e50' }}>{selected.name}</div>
-                  <div style={{ fontSize: 12, color: '#7f8c8d', marginTop: 1 }}>{selected.phone} · 🛍️ {selected.total_orders} คำสั่งซื้อ</div>
+                  <div style={{ fontSize: 12, color: '#7f8c8d', marginTop: 1 }}>
+                    {(!can('view_full_pii') && !revealedPhoneIds.has(selected.id)) ? maskPhone(selected.phone) : selected.phone} · 🛍️ {selected.total_orders} คำสั่งซื้อ
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {(['crm', 'facebook', 'line', 'instagram', 'tiktok'] as const).map(p => (
@@ -946,8 +956,38 @@ function ConversationsPageContent() {
             <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--gray-border)' }}>
               <div style={{ fontSize: 11, color: 'var(--gray-text)', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>ข้อมูลติดต่อ</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', gap: 8 }}><span>📞</span><span style={{ fontSize: 12, color: 'var(--white-muted)' }}>{selected.phone || 'ไม่ระบุ'}</span></div>
-                <div style={{ display: 'flex', gap: 8 }}><span>📍</span><span style={{ fontSize: 12, color: 'var(--white-muted)', lineHeight: 1.5 }}>{selected.address || 'ไม่ระบุ'}</span></div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span>📞</span>
+                  <span style={{ fontSize: 12, color: 'var(--white-muted)' }}>
+                    {(!can('view_full_pii') && !revealedPhoneIds.has(selected.id)) ? maskPhone(selected.phone) : (selected.phone || 'ไม่ระบุ')}
+                  </span>
+                  {!can('view_full_pii') && can('reveal_pii') && !revealedPhoneIds.has(selected.id) && selected.phone && (
+                    <button 
+                      onClick={() => {
+                        setRevealedPhoneIds(prev => new Set(prev).add(selected.id))
+                        logActivity(profile?.id || 'unknown', 'VIEW_PII_PHONE', 'conversations', selected.id.toString())
+                        toast.success('แสดงเบอร์โทรศัพท์แล้ว (บันทึกประวัติการเข้าชม)')
+                      }}
+                      style={{ background: 'var(--gold-dark)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 9, padding: '1px 4px', cursor: 'pointer' }}
+                    >👁️</button>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <span>📍</span>
+                  <span style={{ fontSize: 12, color: 'var(--white-muted)', lineHeight: 1.5, flex: 1 }}>
+                    {(!can('view_full_pii') && !revealedAddressIds.has(selected.id)) ? maskAddress(selected.address) : (selected.address || 'ไม่ระบุ')}
+                  </span>
+                  {!can('view_full_pii') && can('reveal_pii') && !revealedAddressIds.has(selected.id) && selected.address && (
+                    <button 
+                      onClick={() => {
+                        setRevealedAddressIds(prev => new Set(prev).add(selected.id))
+                        logActivity(profile?.id || 'unknown', 'VIEW_PII_ADDRESS', 'conversations', selected.id.toString())
+                        toast.success('แสดงที่อยู่แล้ว (บันทึกประวัติการเข้าชม)')
+                      }}
+                      style={{ background: 'var(--gold-dark)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 9, padding: '1px 4px', cursor: 'pointer', marginTop: 2 }}
+                    >👁️</button>
+                  )}
+                </div>
               </div>
             </div>
 

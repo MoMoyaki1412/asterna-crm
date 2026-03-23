@@ -35,8 +35,12 @@ export type Permission =
   | 'view_conversations'// Access inbox / conversations
   | 'manage_tags'       // Manage customer tiers and tags
   | 'manage_permissions'// Access /admin/permissions page
+  | 'create_admins'     // Can create new admin accounts
   | 'view_stock'        // View product stock levels
   | 'view_products'     // View product catalog (basic info)
+  | 'view_full_pii'     // See unmasked phone/address
+  | 'reveal_pii'        // Can click to reveal masked PII (logs access)
+  | 'manage_orders'     // Enhanced order management (delete/edit status)
 
 // Role → Permission mapping (Owner has everything) - FALLBACK ONLY
 const FALLBACK_ROLE_PERMISSIONS: Record<string, Permission[]> = {
@@ -44,7 +48,8 @@ const FALLBACK_ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'view_dashboard', 'view_cost', 'edit_products', 'edit_stock',
     'view_orders', 'create_orders', 'delete_orders',
     'view_customers', 'edit_customers', 'view_conversations',
-    'manage_tags', 'manage_permissions', 'view_stock', 'view_products',
+    'manage_tags', 'manage_permissions', 'create_admins', 'view_stock', 'view_products',
+    'view_full_pii', 'manage_orders', 'reveal_pii',
   ],
   manager: [
     'view_dashboard',
@@ -53,12 +58,13 @@ const FALLBACK_ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'view_customers', 'edit_customers',
     'view_conversations',
     'manage_tags', 'view_stock', 'view_products',
+    'view_full_pii', 'manage_orders', 'reveal_pii',
   ],
   staff: [
     'view_orders', 'create_orders',
     'view_customers',
     'view_conversations',
-    'view_products',
+    'view_products', 'reveal_pii',
   ],
 }
 

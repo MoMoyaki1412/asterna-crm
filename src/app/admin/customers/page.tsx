@@ -4,6 +4,9 @@ import { supabase } from '@/lib/supabase'
 import { CustomerSelect } from '@/components/CustomerSelect'
 import toast from 'react-hot-toast'
 import Link from 'next/link'
+import { useAdminAuth } from '@/contexts/AdminAuthContext'
+import { maskPhone, maskAddress } from '@/lib/security'
+import { logActivity } from '@/lib/logger'
 
 type Customer = {
   id: number
@@ -67,6 +70,8 @@ export default function CustomersPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const { can, profile: myProfile } = useAdminAuth()
+  const [revealedIds, setRevealedIds] = useState<Set<number>>(new Set())
 
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [customerOrders, setCustomerOrders] = useState<Order[]>([])
@@ -630,37 +635,98 @@ export default function CustomersPage() {
                     <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--gray-text)', marginBottom: 16 }}>🚚 ข้อมูลการจัดส่ง</h3>
                     
                     <div style={{ marginBottom: 16 }}>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 8 }}>ผู้รับ / เบอร์โทรศัพท์</label>
-                      <div style={{ display: 'flex', gap: 10 }}>
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                         <input type="text" value={editName} onChange={e => setEditName(e.target.value)} placeholder="ชื่อผู้รับ" className="input" style={{ flex: 1.5 }} />
-                        <input type="tel" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="เบอร์โทร" className="input" style={{ flex: 1 }} />
+                        <div style={{ flex: 1, position: 'relative' }}>
+                          <input 
+                            type="tel" 
+                            disabled={!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)}
+                            value={(!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)) ? maskPhone(editPhone) : editPhone} 
+                            onChange={e => setEditPhone(e.target.value)} 
+                            placeholder="เบอร์โทร" 
+                            className="input" 
+                            style={{ width: '100%' }} 
+                          />
+                          {!can('view_full_pii') && can('reveal_pii') && !revealedIds.has(selectedCustomer?.id || 0) && (
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                if (selectedCustomer) {
+                                  setRevealedIds(prev => new Set(prev).add(selectedCustomer.id))
+                                  logActivity(myProfile?.id || 'unknown', 'VIEW_PII_PHONE', 'customers', selectedCustomer.id.toString())
+                                  toast.success('แสดงเบอร์โทรศัพท์แล้ว (บันทึกประวัติการเข้าชม)')
+                                }
+                              }}
+                              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'var(--gold-dark)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 10, padding: '2px 6px', cursor: 'pointer' }}
+                            >
+                              👁️ ดู
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
 
                     <div style={{ marginBottom: 16 }}>
                       <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 8 }}>ที่อยู่จัดส่ง (บ้านเลขที่, ถนน, หมู่บ้าน)</label>
-                      <textarea value={editAddress} onChange={e => setEditAddress(e.target.value)} placeholder="รายละเอียดบ้านเลขที่ และถนน..." className="input" rows={2} style={{ width: '100%', resize: 'none' }} />
+                      <div style={{ position: 'relative' }}>
+                        <textarea 
+                          disabled={!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)}
+                          value={(!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)) ? maskAddress(editAddress) : editAddress} 
+                          onChange={e => setEditAddress(e.target.value)} 
+                          placeholder="รายละเอียดบ้านเลขที่ และถนน..." 
+                          className="input" 
+                          rows={2} 
+                          style={{ width: '100%', resize: 'none' }} 
+                        />
+                        {!can('view_full_pii') && can('reveal_pii') && !revealedIds.has(selectedCustomer?.id || 0) && (
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              if (selectedCustomer) {
+                                setRevealedIds(prev => new Set(prev).add(selectedCustomer.id))
+                                logActivity(myProfile?.id || 'unknown', 'VIEW_PII_ADDRESS', 'customers', selectedCustomer.id.toString())
+                                toast.success('แสดงที่อยู่แล้ว (บันทึกประวัติการเข้าชม)')
+                              }
+                            }}
+                            style={{ position: 'absolute', right: 8, bottom: 8, background: 'var(--gold-dark)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 10, padding: '2px 6px', cursor: 'pointer' }}
+                          >
+                            👁️ ดูข้อมูลเต็ม
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
                       <div>
                         <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 6 }}>ตำบล / แขวง</label>
-                        <input type="text" value={editSubdistrict} onChange={e => setEditSubdistrict(e.target.value)} className="input" style={{ width: '100%' }} />
+                        <input type="text" 
+                          disabled={!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)}
+                          value={(!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)) ? '(ซ่อนโดยระบบ)' : editSubdistrict} 
+                          onChange={e => setEditSubdistrict(e.target.value)} className="input" style={{ width: '100%' }} />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 6 }}>อำเภอ / เขต</label>
-                        <input type="text" value={editDistrict} onChange={e => setEditDistrict(e.target.value)} className="input" style={{ width: '100%' }} />
+                        <input type="text" 
+                          disabled={!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)}
+                          value={(!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)) ? '(ซ่อนโดยระบบ)' : editDistrict} 
+                          onChange={e => setEditDistrict(e.target.value)} className="input" style={{ width: '100%' }} />
                       </div>
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                       <div>
                         <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 6 }}>จังหวัด</label>
-                        <input type="text" value={editProvince} onChange={e => setEditProvince(e.target.value)} className="input" style={{ width: '100%' }} />
+                        <input type="text" 
+                          disabled={!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)}
+                          value={(!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)) ? '(ซ่อนโดยระบบ)' : editProvince} 
+                          onChange={e => setEditProvince(e.target.value)} className="input" style={{ width: '100%' }} />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray-text)', marginBottom: 6 }}>รหัสไปรษณีย์</label>
-                        <input type="text" value={editZipcode} onChange={e => setEditZipcode(e.target.value)} className="input" style={{ width: '100%', letterSpacing: 1 }} />
+                        <input type="text" 
+                          disabled={!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)}
+                          value={(!can('view_full_pii') && !revealedIds.has(selectedCustomer?.id || 0)) ? '(ซ่อนโดยระบบ)' : editZipcode} 
+                          onChange={e => setEditZipcode(e.target.value)} className="input" style={{ width: '100%', letterSpacing: 1 }} />
                       </div>
                     </div>
                   </div>

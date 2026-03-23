@@ -10,7 +10,7 @@ export async function logActivity(
   try {
     const { error } = await supabase.from('activity_logs').insert({
       admin_id: adminId,
-      action,
+      action_type: action,
       entity_type: entityType,
       entity_id: entityId,
       details
