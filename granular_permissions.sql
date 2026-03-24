@@ -19,7 +19,29 @@ CREATE TABLE IF NOT EXISTS public.role_permissions (
     UNIQUE(role_id, permission)
 );
 
--- 2. Seed default roles if empty
+-- Enable RLS
+ALTER TABLE public.roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.role_permissions ENABLE ROW LEVEL SECURITY;
+
+-- 2. Policies for Roles Table
+-- Allow all authenticated admins to READ roles (to show icons/names in UI)
+CREATE POLICY "All admins can read roles" ON public.roles
+FOR SELECT USING (auth.role() = 'authenticated');
+
+-- Only admins with 'manage_permissions' can modify roles
+CREATE POLICY "Manage roles based on permission" ON public.roles
+FOR ALL USING (public.auth_has_permission('manage_permissions'));
+
+-- 3. Policies for Role Permissions Table
+-- Allow all authenticated admins to READ permissions
+CREATE POLICY "All admins can read role permissions" ON public.role_permissions
+FOR SELECT USING (auth.role() = 'authenticated');
+
+-- Only admins with 'manage_permissions' can modify permissions
+CREATE POLICY "Manage permissions based on permission" ON public.role_permissions
+FOR ALL USING (public.auth_has_permission('manage_permissions'));
+
+-- 4. Seed default roles if empty
 INSERT INTO public.roles (id, label, color, icon)
 VALUES 
     ('owner', 'Owner', '#C9A84C', '👑'),
@@ -39,7 +61,7 @@ VALUES
     ('manager', 'view_full_pii'), ('manager', 'manage_orders'), ('manager', 'reveal_pii')
 ON CONFLICT DO NOTHING;
 
--- 4. Create Helper Function to check permissions in RLS
+-- 5. Create Helper Function to check permissions in RLS
 CREATE OR REPLACE FUNCTION public.auth_has_permission(required_permission TEXT)
 RETURNS BOOLEAN AS $$
 DECLARE
@@ -59,7 +81,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 5. Update RLS Policies for Customers
+-- 6. Update RLS Policies for Customers
 DROP POLICY IF EXISTS "Authenticated users can read customers" ON public.customers;
 CREATE POLICY "Role-based read customers" ON public.customers 
 FOR SELECT USING (public.auth_has_permission('view_customers'));
@@ -68,7 +90,7 @@ DROP POLICY IF EXISTS "Authenticated users can update customers" ON public.custo
 CREATE POLICY "Role-based update customers" ON public.customers 
 FOR UPDATE USING (public.auth_has_permission('edit_customers'));
 
--- 6. Update RLS Policies for Orders
+-- 7. Update RLS Policies for Orders
 DROP POLICY IF EXISTS "Authenticated users can read orders" ON public.orders;
 CREATE POLICY "Role-based read orders" ON public.orders 
 FOR SELECT USING (public.auth_has_permission('view_orders'));
