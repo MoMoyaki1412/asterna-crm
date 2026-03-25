@@ -15,6 +15,7 @@ export type Customer = {
   total_orders?: number
   tags?: string
   reward_points?: number
+  is_active?: boolean
 }
 
 export function CustomerSelect({ onSelect }: { onSelect: (c: Customer | null) => void }) {
@@ -60,7 +61,8 @@ export function CustomerSelect({ onSelect }: { onSelect: (c: Customer | null) =>
       setLoading(true)
       const { data } = await supabase
         .from('customers')
-        .select('id, name, phone, address, total_orders, tags, reward_points')
+        .select('id, name, phone, address, total_orders, tags, reward_points, is_active')
+        .eq('is_active', true)
         .ilike('name', `%${query}%`)
         .order('total_orders', { ascending: false })
         .limit(10)

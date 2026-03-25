@@ -18,6 +18,7 @@ type Product = {
   stock_reserved: number
   stock_shipped: number
   active_ingredients: string[]
+  is_active: boolean
 }
 
 type LineItem = {
@@ -111,7 +112,7 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
     async function init() {
       // 1. Fetch system data
       const [pRes, tRes, cRes, bRes] = await Promise.all([
-        supabase.from('products').select('*').eq('is_active', true).order('id'),
+        supabase.from('products').select('*').order('id'),
         supabase.from('customer_tiers').select('*'),
         supabase.from('campaigns').select('*').eq('is_active', true).order('name'),
         supabase.from('bank_accounts').select('*').eq('is_active', true).order('bank_name')
@@ -601,7 +602,11 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
                                   const p = products.find(p => p.id === parseInt(e.target.value))
                                   if (p) updateLineItem(index, 'product', p)
                                 }} style={{ width: '100%', padding: '6px 8px', fontSize: 13 }}>
-                                {products.map(p => <option key={p.id} value={p.id}>[{p.sku}] {p.name}</option>)}
+                                {products.filter(p => p.is_active || p.id === item.product.id).map(p => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.is_active ? '' : '[ARCHIVED] '}[{p.sku}] {p.name}
+                                  </option>
+                                ))}
                               </select>
                             </td>
                             <td style={{ padding: '8px 10px' }}>

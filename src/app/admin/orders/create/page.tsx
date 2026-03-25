@@ -66,7 +66,7 @@ function CreateOrderPageContent() {
   useEffect(() => {
     async function loadData() {
       const [pRes, tRes, cRes, bRes] = await Promise.all([
-        supabase.from('products').select('*').order('id'),
+        supabase.from('products').select('*').eq('is_active', true).order('id'),
         supabase.from('customer_tiers').select('*'),
         supabase.from('campaigns').select('*').eq('is_active', true).order('name'),
         supabase.from('bank_accounts').select('*').eq('is_active', true).order('bank_name')
