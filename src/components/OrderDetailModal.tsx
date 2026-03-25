@@ -72,6 +72,8 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
   const [couponCode, setCouponCode] = useState('')
   const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null)
   const [couponStatus, setCouponStatus] = useState<{ok: boolean; msg: string} | null>(null)
+  const [initialCouponId, setInitialCouponId] = useState<number | null>(null)
+  const [initialCampaignId, setInitialCampaignId] = useState<number | null>(null)
   const [couponLoading, setCouponLoading] = useState(false)
   const [note, setNote] = useState('')
 
@@ -109,7 +111,7 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
     async function init() {
       // 1. Fetch system data
       const [pRes, tRes, cRes, bRes] = await Promise.all([
-        supabase.from('products').select('*').order('id'),
+        supabase.from('products').select('*').eq('is_active', true).order('id'),
         supabase.from('customer_tiers').select('*'),
         supabase.from('campaigns').select('*').eq('is_active', true).order('name'),
         supabase.from('bank_accounts').select('*').eq('is_active', true).order('bank_name')
@@ -156,6 +158,7 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
       }
 
       if (oData.coupon_id) {
+        setInitialCouponId(oData.coupon_id)
         const { data: qCoupon } = await supabase.from('coupons').select('*').eq('id', oData.coupon_id).single()
         if (qCoupon) {
           setAppliedCoupon(qCoupon)
@@ -163,6 +166,8 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
           setCouponStatus({ ok: true, msg: `✓ ${qCoupon.name} (คูปองที่ใช้แล้ว)` })
         }
       }
+
+      setInitialCampaignId(oData.campaign_id || null)
 
       // Fetch Customer
       if (oData.customer_id) {
@@ -326,27 +331,59 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
     }
     setStatusSaving(true)
     try {
-      // 1. Inventory Sync
-      if (newStatus === 'shipped' && orderStatus !== 'shipped' && orderStatus !== 'completed') {
+      // 1. Inventory Sync (Atomic RPC)
+      const RESERVE_STATUSES = ['transferred', 'pending']
+      const SHIP_STATUSES = ['shipped', 'completed']
+
+      const getImpact = (status: string) => {
+        if (RESERVE_STATUSES.includes(status)) return { res: 1, tot: 0, shp: 0 }
+        if (SHIP_STATUSES.includes(status)) return { res: 0, tot: -1, shp: 1 }
+        return { res: 0, tot: 0, shp: 0 }
+      }
+
+      const oldI = getImpact(orderStatus)
+      const newI = getImpact(newStatus)
+      
+      const diffRes = newI.res - oldI.res
+      const diffTot = newI.tot - oldI.tot
+      const diffShp = newI.shp - oldI.shp
+
+      if (diffRes !== 0 || diffTot !== 0 || diffShp !== 0) {
         for (const item of lineItems) {
-           const { data: pData } = await supabase.from('products').select('stock_total, stock_shipped').eq('id', item.product.id).single()
-           if (pData) {
-             await supabase.from('products').update({
-                stock_total: Math.max(0, pData.stock_total - item.qty),
-                stock_shipped: (pData.stock_shipped || 0) + item.qty
-             }).eq('id', item.product.id)
-           }
+          await supabase.rpc('handle_stock_impact', {
+            p_id: item.product.id,
+            diff_res: diffRes * item.qty,
+            diff_tot: diffTot * item.qty,
+            diff_shp: diffShp * item.qty
+          })
         }
       }
 
       // 2. Loyalty Points: Database trigger handles this automatically
-      // Handled by the .update() call below.
+      // 3. Coupon/Campaign Usage Sync
+      const USED_STATUSES = ['transferred', 'pending', 'shipped', 'completed']
+      const oldIsUsed = USED_STATUSES.includes(orderStatus)
+      const newIsUsed = USED_STATUSES.includes(newStatus)
+      if (oldIsUsed !== newIsUsed) {
+        const diff = newIsUsed ? 1 : -1
+        if (appliedCoupon?.id) {
+          const { data: cp } = await supabase.from('coupons').select('uses_count').eq('id', appliedCoupon.id).single()
+          if (cp) {
+            await supabase.from('coupons').update({ uses_count: Math.max(0, cp.uses_count + diff) }).eq('id', appliedCoupon.id)
+          }
+        }
+        if (selectedCampaignId) {
+          const { data: camp } = await supabase.from('campaigns').select('uses_count').eq('id', selectedCampaignId).single()
+          if (camp) {
+            await supabase.from('campaigns').update({ uses_count: Math.max(0, (camp as any).uses_count + diff) }).eq('id', selectedCampaignId)
+          }
+        }
+      }
 
       const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', orderId)
       if (error) throw error
       setOrderStatus(newStatus)
       if (onStatusChange) onStatusChange()
-      // Optional: Show a small toast or just let the UI reflect it
     } catch (err: any) {
       toast.error('❌ ไม่สามารถเปลี่ยนสถานะได้: ' + err.message)
     } finally {
@@ -361,6 +398,11 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
     
     setSaving(true)
     try {
+      // 0. Fetch current status and items BEFORE update for accurate inventory sync
+      const { data: oldOData } = await supabase.from('orders').select('status').eq('id', orderId).single()
+      const oldStatus = oldOData?.status || 'unpaid' 
+      const { data: oldItems } = await supabase.from('order_items').select('product_id, qty').eq('order_id', orderId)
+
       const itemsSummary = lineItems.map(item => `${item.product.name} x${item.qty}`).join(', ')
 
       const { error: orderErr } = await supabase.from('orders').update({
@@ -389,27 +431,83 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
         expiry_date: expiryDate ? new Date(expiryDate).toISOString() : null,
         admin_id: profile?.id || null
       }).eq('id', orderId)
-
       if (orderErr) throw orderErr
 
-      // Sync Inventory if status changed to shipped during full save
-      const { data: currentOData } = await supabase.from('orders').select('status').eq('id', orderId).single()
-      const oldDbStatus = currentOData?.status || 'pending'
+      // 1. Inventory Sync (Unified Bidirectional for Full Save)
+      // Since items or status could change, we reverse the old impact and apply the new one.
+      const RESERVE_STATUSES = ['transferred', 'pending']
+      const SHIP_STATUSES = ['shipped', 'completed']
       
-      if (orderStatus === 'shipped' && oldDbStatus !== 'shipped' && oldDbStatus !== 'completed') {
+      const getImpact = (status: string) => {
+        if (RESERVE_STATUSES.includes(status)) return { res: 1, tot: 0, shp: 0 }
+        if (SHIP_STATUSES.includes(status)) return { res: 0, tot: -1, shp: 1 }
+        return { res: 0, tot: 0, shp: 0 }
+      }
+
+           // Step A: Reverse old impact
+      const oldIImpact = getImpact(oldStatus)
+      if (oldItems && (oldIImpact.res !== 0 || oldIImpact.tot !== 0 || oldIImpact.shp !== 0)) {
+        for (const item of oldItems) {
+          await supabase.rpc('handle_stock_impact', {
+            p_id: item.product_id,
+            diff_res: -(oldIImpact.res * item.qty),
+            diff_tot: -(oldIImpact.tot * item.qty),
+            diff_shp: -(oldIImpact.shp * item.qty)
+          })
+        }
+      }
+
+      // Step B: Apply new impact
+      const newIImpact = getImpact(orderStatus)
+      if (newIImpact.res !== 0 || newIImpact.tot !== 0 || newIImpact.shp !== 0) {
         for (const item of lineItems) {
-           const { data: pData } = await supabase.from('products').select('stock_total, stock_shipped').eq('id', item.product.id).single()
-           if (pData) {
-             await supabase.from('products').update({
-                stock_total: Math.max(0, pData.stock_total - item.qty),
-                stock_shipped: (pData.stock_shipped || 0) + item.qty
-             }).eq('id', item.product.id)
-           }
+          await supabase.rpc('handle_stock_impact', {
+            p_id: item.product.id,
+            diff_res: newIImpact.res * item.qty,
+            diff_tot: newIImpact.tot * item.qty,
+            diff_shp: newIImpact.shp * item.qty
+          })
         }
       }
 
       // 2. Loyalty Points: Database trigger handles this automatically
       // Handled during the .update({ total, status, etc. }) call above.
+
+      // 3. Coupon/Campaign Usage Sync (Full Save)
+      const USED_STATUSES = ['transferred', 'pending', 'shipped', 'completed']
+      const oldIsUsed = USED_STATUSES.includes(oldStatus)
+      const newIsUsed = USED_STATUSES.includes(orderStatus)
+      
+      const newCouponId = appliedCoupon?.id || null
+      const newCampaignId = selectedCampaignId || null
+
+      // Decrement Old if it was used
+      if (oldIsUsed) {
+        if (initialCouponId && (initialCouponId !== newCouponId || !newIsUsed)) {
+          const { data: cp } = await supabase.from('coupons').select('uses_count').eq('id', initialCouponId).single()
+          if (cp) await supabase.from('coupons').update({ uses_count: Math.max(0, cp.uses_count - 1) }).eq('id', initialCouponId)
+        }
+        if (initialCampaignId && (initialCampaignId !== newCampaignId || !newIsUsed)) {
+          const { data: camp } = await supabase.from('campaigns').select('uses_count').eq('id', initialCampaignId).single()
+          if (camp) await supabase.from('campaigns').update({ uses_count: Math.max(0, (camp as any).uses_count - 1) }).eq('id', initialCampaignId)
+        }
+      }
+
+      // Increment New if it's now used
+      if (newIsUsed) {
+        if (newCouponId && (newCouponId !== initialCouponId || !oldIsUsed)) {
+          const { data: cp } = await supabase.from('coupons').select('uses_count').eq('id', newCouponId).single()
+          if (cp) await supabase.from('coupons').update({ uses_count: cp.uses_count + 1 }).eq('id', newCouponId)
+        }
+        if (newCampaignId && (newCampaignId !== initialCampaignId || !oldIsUsed)) {
+          const { data: camp } = await supabase.from('campaigns').select('uses_count').eq('id', newCampaignId).single()
+          if (camp) await supabase.from('campaigns').update({ uses_count: (camp as any).uses_count + 1 }).eq('id', newCampaignId)
+        }
+      }
+
+      // Update state for next edit
+      setInitialCouponId(newCouponId)
+      setInitialCampaignId(newCampaignId)
 
       // Delete old items & Insert new items
       await supabase.from('order_items').delete().eq('order_id', orderId)

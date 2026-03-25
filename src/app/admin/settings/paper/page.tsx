@@ -1,6 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAdminAuth } from '@/contexts/AdminAuthContext'
+import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 
 type PaperSettings = {
@@ -34,9 +36,18 @@ const DEFAULT_SETTINGS: PaperSettings = {
 }
 
 export default function PaperSettingsPage() {
+  const { can, loading: authLoading } = useAdminAuth()
+  const router = useRouter()
   const [settings, setSettings] = useState<PaperSettings>(DEFAULT_SETTINGS)
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    if (!authLoading && !can('manage_paper')) {
+      // Access denied will be handled by the UI below
+    }
+  }, [authLoading, can, router])
 
   useEffect(() => {
     async function load() {
@@ -48,6 +59,7 @@ export default function PaperSettingsPage() {
       if (data?.value) {
         setSettings({ ...DEFAULT_SETTINGS, ...data.value })
       }
+      setLoading(false)
     }
     load()
   }, [])
@@ -123,6 +135,27 @@ export default function PaperSettingsPage() {
       </button>
     </div>
   )
+
+  if (authLoading || loading) {
+    return <div style={{ padding: 40, color: 'var(--gray-text)' }}>⏳ กำลังโหลด...</div>
+  }
+
+  if (!authLoading && !can('manage_paper')) {
+    return (
+      <div className="page-body animate-in" style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        minHeight: '70vh', textAlign: 'center', gap: 16
+      }}>
+        <div style={{ fontSize: 64 }}>🛡️</div>
+        <h2 style={{ fontSize: 24, fontWeight: 800 }}>สิทธิ์การเข้าถึงถูกจำกัด</h2>
+        <p style={{ color: 'var(--gray-text)', maxWidth: 400 }}>
+          ขออภัย คุณไม่ได้รับอนุญาตให้จัดการตั้งค่าหน้ากระดาษในส่วนของระบบตั้งค่า<br/>
+          หากต้องการเข้าถึง กรุณาติดต่อ Owner ของระบบ
+        </p>
+        <button onClick={() => router.push('/admin')} className="btn btn-ghost">กลับไปยังหน้าหลัก</button>
+      </div>
+    )
+  }
 
   return (
     <div>

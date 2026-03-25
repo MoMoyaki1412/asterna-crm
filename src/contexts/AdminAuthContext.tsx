@@ -41,6 +41,13 @@ export type Permission =
   | 'view_full_pii'     // See unmasked phone/address
   | 'reveal_pii'        // Can click to reveal masked PII (logs access)
   | 'manage_orders'     // Enhanced order management (delete/edit status)
+  | 'view_admin_list'   // See the list of all administrators
+  | 'view_campaigns'    // View campaign list
+  | 'edit_campaigns'    // Create/Edit campaigns
+  | 'view_vouchers'     // View coupon list
+  | 'edit_vouchers'     // Create/Edit coupons
+  | 'manage_bank'
+  | 'manage_paper'
 
 // Role → Permission mapping (Owner has everything) - FALLBACK ONLY
 const FALLBACK_ROLE_PERMISSIONS: Record<string, Permission[]> = {
@@ -49,7 +56,9 @@ const FALLBACK_ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'view_orders', 'create_orders', 'delete_orders',
     'view_customers', 'edit_customers', 'view_conversations',
     'manage_tags', 'manage_permissions', 'create_admins', 'view_stock', 'view_products',
-    'view_full_pii', 'manage_orders', 'reveal_pii',
+    'view_full_pii', 'manage_orders', 'reveal_pii', 'view_admin_list',
+    'view_campaigns', 'edit_campaigns', 'view_vouchers', 'edit_vouchers',
+    'manage_bank', 'manage_paper',
   ],
   manager: [
     'view_dashboard',
@@ -58,7 +67,10 @@ const FALLBACK_ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'view_customers', 'edit_customers',
     'view_conversations',
     'manage_tags', 'view_stock', 'view_products',
-    'view_full_pii', 'manage_orders', 'reveal_pii',
+    'view_full_pii', 'manage_orders', 'reveal_pii', 'view_admin_list',
+    'view_campaigns', 'edit_campaigns', 
+    'view_vouchers', 'edit_vouchers',
+    'manage_bank', 'manage_paper',
   ],
   staff: [
     'view_orders', 'create_orders',
@@ -125,19 +137,10 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
         .single()
 
       if (error || !data) {
-        // Auto-create a profile if none exists (first time login)
-        const { data: newProfile } = await supabase
-          .from('admin_profiles')
-          .insert({
-            id: user.id,
-            email: user.email!,
-            display_name: user.email?.split('@')[0] || 'Admin',
-            role: 'staff', // Default to staff for safety
-          })
-          .select()
-          .single()
-        
-        setProfile(newProfile || null)
+        // 🚨 SECURITY FIX: Do not auto-create admin profiles.
+        // A profile must be explicitly created by an Owner via Invitations or Database Triggers.
+        console.warn('No admin profile found for this user. Manual assignment required.');
+        setProfile(null)
       } else {
         setProfile(data)
       }

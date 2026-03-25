@@ -119,7 +119,7 @@ export default function AdminDashboard() {
     async function fetchAllData() {
       const { data: orders } = await supabase
         .from('orders')
-        .select('id, total, status, order_date, discount, shipping_cost, customer_id, customer_name, source')
+        .select('id, total, status, order_date, discount, shipping_cost, customer_id, customer_name, source, admin_id')
         .order('order_date', { ascending: false })
 
       const { data: items } = await supabase
@@ -190,8 +190,26 @@ export default function AdminDashboard() {
       endDate = customEnd ? new Date(new Date(customEnd).getTime() + 24*60*60*1000) : new Date(now.getTime() + 24*60*60*1000)
     }
 
+    const CONFIRMED_STATUSES = ['pending', 'transferred', 'shipped', 'completed']
+    const PROJECTED_STATUSES = ['unpaid', 'draft']
+
+    // 1. Confirmed Orders (Main Metrics & Charts)
+    const confirmedOrders = allOrders.filter(o => {
+      if (!CONFIRMED_STATUSES.includes(o.status)) return false
+      const d = new Date(o.order_date)
+      return dateFilter === 'CUSTOM' ? (d >= startDate && d <= endDate) : (d >= startDate)
+    })
+
+    // 2. Projected Orders (Forecasting Only)
+    const projectedOrders = allOrders.filter(o => {
+      if (!PROJECTED_STATUSES.includes(o.status)) return false
+      const d = new Date(o.order_date)
+      return dateFilter === 'CUSTOM' ? (d >= startDate && d <= endDate) : (d >= startDate)
+    })
+
+    // 3. All Active Orders (Admin Effort & Recent List)
     const activeOrders = allOrders.filter(o => {
-      if (o.status === 'cancelled') return false
+      if (o.status === 'cancelled' || o.status === 'expired') return false
       const d = new Date(o.order_date)
       return dateFilter === 'CUSTOM' ? (d >= startDate && d <= endDate) : (d >= startDate)
     })
@@ -201,7 +219,7 @@ export default function AdminDashboard() {
        return dateFilter === 'CUSTOM' ? (d >= startDate && d <= endDate) : (d >= startDate)
     })
     
-    setRecentOrders(allOrders.slice(0, 5))
+    setRecentOrders(activeOrders.slice(0, 10))
 
     // 2. Aggregate Sales & Platforms
     let salesSum = 0
@@ -211,7 +229,7 @@ export default function AdminDashboard() {
     
     ALL_PLATFORMS.forEach(p => { pSales[p] = 0; pOrders[p] = 0 })
 
-    activeOrders.forEach(o => {
+    confirmedOrders.forEach(o => {
       salesSum += o.total
       const d = new Date(o.order_date)
       const dateStr = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`
@@ -223,7 +241,7 @@ export default function AdminDashboard() {
     })
 
     setTotalSales(salesSum)
-    setTotalOrders(activeOrders.length)
+    setTotalOrders(confirmedOrders.length)
     setPlatformSales(pSales)
     setPlatformOrders(pOrders)
 
@@ -290,8 +308,8 @@ export default function AdminDashboard() {
 
 
     // 5. Aggregate Products & Calculate Profits
-    const activeOrderIds = new Set(activeOrders.map(o => o.id))
-    const filteredItems = allItems.filter(i => activeOrderIds.has(i.order_id))
+    const confirmedIds = new Set(confirmedOrders.map(o => o.id))
+    const filteredItems = allItems.filter(i => confirmedIds.has(i.order_id))
     let itemsS = 0, tCost = 0
     const productStats: Record<number, any> = {}
 
@@ -299,7 +317,7 @@ export default function AdminDashboard() {
     const orderMap: Record<number, OrderData> = {}
     const orderGrossSubtotals: Record<number, number> = {}
     
-    activeOrders.forEach(o => { 
+    confirmedOrders.forEach(o => { 
       orderMap[o.id] = o
       orderGrossSubtotals[o.id] = 0 
     })
@@ -347,19 +365,17 @@ export default function AdminDashboard() {
     setTotalCost(tCost)
     
     // Total Profit = (Total Sales - Total Shipping) - Total Cost 
-    // We only calculate realized profit from active orders (totalSales sum already handled this for all active)
-    const totalShipping = activeOrders.reduce((sum, o) => sum + (o.shipping_cost || 0), 0)
+    const totalShipping = confirmedOrders.reduce((sum, o) => sum + (o.shipping_cost || 0), 0)
     const netProfit = (salesSum - totalShipping) - tCost
     setTotalProfit(netProfit)
 
-    // Projected Profit (From Pending Orders)
-    const pendingOrders = activeOrders.filter(o => o.status === 'pending')
-    const pendingOrderIds = new Set(pendingOrders.map(o => o.id))
+    // 6. Projected Profit (From Projected Orders only)
+    const pendingOrderIds = new Set(projectedOrders.map(o => o.id))
     const pendingItems = allItems.filter(i => pendingOrderIds.has(i.order_id))
     
     let pendingSales = 0
     let pendingShipping = 0
-    pendingOrders.forEach(o => {
+    projectedOrders.forEach(o => {
        pendingSales += o.total
        pendingShipping += o.shipping_cost || 0
     })
@@ -463,9 +479,15 @@ export default function AdminDashboard() {
             <div style={{ fontSize: 11, color: 'var(--gray-text)', marginTop: 4 }}>Gross Profit Margin</div>
           </div>
           <div className="animate-in fast" style={{ background: 'rgba(201, 169, 110, 0.05)', border: '1px solid var(--gold-dark)', borderRadius: 12, padding: 24 }}>
-            <div style={{ fontSize: 13, color: 'var(--gray-text)', marginBottom: 8, fontWeight: 600 }}>Profit Forecasting (กำไรคาดการณ์) 🔮</div>
+            <div style={{ fontSize: 13, color: 'var(--gray-text)', marginBottom: 8, fontWeight: 700, display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Profit Forecasting</span>
+                <span style={{ fontSize: 16 }}>🔮</span>
+              </div>
+              <span style={{ fontSize: 10, opacity: 0.6, fontWeight: 400, marginTop: 4 }}>(กำไรคาดการณ์)</span>
+            </div>
             <div style={{ fontSize: 32, fontWeight: 900, color: 'var(--gold-primary)' }}>{projectedProfit.toLocaleString()}</div>
-            <div style={{ fontSize: 11, color: 'var(--gray-text)', marginTop: 4 }}>จากออร์เดอร์รอดำเนินการ (Pending)</div>
+            <div style={{ fontSize: 11, color: 'var(--gray-text)', marginTop: 4 }}>จากออร์เดอร์รอดำเนินการ (Pending/Unpaid/Draft)</div>
           </div>
         </div>
 
@@ -590,7 +612,7 @@ export default function AdminDashboard() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
           {/* Platform Performance (Sales Amount) */}
           <div className="animate-in" style={{ background: 'var(--black-card)', border: '1px solid var(--gray-border)', borderRadius: 12, padding: 24 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 24 }}>🌐 ยอดขายแยกตามช่องทาง (มูลค่า)</div>
+            <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 24 }}>🌐 ยอดขายแยกตามช่องทาง</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {Object.entries(platformSales).sort((a,b) => b[1] - a[1]).map(([platform, amt], idx) => (
                 <div key={platform}>
@@ -642,7 +664,7 @@ export default function AdminDashboard() {
           {/* Top Selling Products */}
           <div style={{ background: 'var(--black-card)', border: '1px solid var(--gray-border)', borderRadius: 12, overflow: 'hidden' }}>
             <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--gray-border)' }}>
-              <h3 style={{ fontSize: 16, fontWeight: 800 }}>👑 5 อันดับสินค้าขายดี (กราฟแท่ง)</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 800 }}>👑 5 อันดับสินค้าขายดี</h3>
             </div>
             {topProducts.length === 0 ? (
               <div style={{ padding: 40, textAlign: 'center', color: 'var(--gray-text)' }}>ยังไม่มีข้อมูลสินค้า</div>

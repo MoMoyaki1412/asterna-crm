@@ -21,6 +21,7 @@ interface Product {
   stock_reserved: number
   stock_shipped: number
   active_ingredients: string[]
+  is_active?: boolean
 }
 
 export default function ProductsPage() {
@@ -56,6 +57,7 @@ export default function ProductsPage() {
       const { data, error } = await supabase
         .from('products')
         .select('*')
+        .eq('is_active', true)
         .order('sku', { ascending: true })
 
       if (error) throw error
@@ -91,6 +93,28 @@ export default function ProductsPage() {
       active_ingredients: p.active_ingredients?.join(', ') || ''
     })
     setIsModalOpen(true)
+  }
+
+  const deleteProduct = async (id: number, name: string) => {
+    if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบสินค้า "${name}"?`)) return
+    
+    try {
+      setLoading(true)
+      const { error } = await supabase
+        .from('products')
+        .update({ is_active: false })
+        .eq('id', id)
+      
+      if (error) throw error
+      
+      logActivity(myProfile?.id || 'system', 'DELETE_PRODUCT_SOFT', 'products', id.toString(), { name })
+      setProducts(prev => prev.filter(p => p.id !== id))
+      toast.success('ลบสินค้าเรียบร้อยแล้ว (Soft Delete)')
+    } catch (err: any) {
+      toast.error('ลบไม่สำเร็จ: ' + err.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const openStockModal = (p: Product) => {
@@ -325,6 +349,16 @@ export default function ProductsPage() {
                               }}
                             >
                               ✏️ แก้ไข
+                            </button>
+                            <button 
+                              onClick={() => deleteProduct(p.id, p.name)}
+                              style={{
+                                padding: '4px 8px', borderRadius: 4,
+                                background: 'rgba(255,68,68,0.2)', color: '#ff4444', fontSize: 10, border: '1px solid #ff4444',
+                                backdropFilter: 'blur(4px)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4
+                              }}
+                            >
+                              🗑️ ลบ
                             </button>
                           </>
                         )}

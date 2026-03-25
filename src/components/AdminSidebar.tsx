@@ -72,33 +72,42 @@ export default function AdminSidebar() {
           </Link>
         )}
 
-        {/* Campaigns - Owner & Manager only */}
-        {can('manage_tags') && (
+        {/* Campaigns - Granular permission */}
+        {can('view_campaigns') && (
           <Link href="/admin/campaigns" className={`nav-item ${isActive('/admin/campaigns') ? 'active' : ''}`}>
             <span className="icon">🎯</span>แคมเปญส่วนลด
           </Link>
         )}
 
-        {/* Coupons - Owner & Manager only */}
-        {can('manage_tags') && (
+        {/* Coupons - Granular permission */}
+        {can('view_vouchers') && (
           <Link href="/admin/coupons" className={`nav-item ${isActive('/admin/coupons') ? 'active' : ''}`}>
             <span className="icon">🎟️</span>คูปอง
           </Link>
         )}
 
-        {/* Permissions - Owner only */}
-        {can('manage_permissions') && (
+        {/* Settings & Admin Matrix */}
+        {(can('manage_permissions') || can('manage_bank') || can('manage_paper')) && (
           <>
             <p className="nav-section-title" style={{ marginTop: 16 }}>ผู้ดูแลระบบ</p>
-            <Link href="/admin/permissions" className={`nav-item ${isActive('/admin/permissions') ? 'active' : ''}`}>
-              <span className="icon">🔐</span>จัดการสิทธิ์
-            </Link>
-            <Link href="/admin/settings/bank" className={`nav-item ${isActive('/admin/settings/bank') ? 'active' : ''}`}>
-              <span className="icon">🏦</span>ตั้งค่าบัญชีธนาคาร
-            </Link>
-            <Link href="/admin/settings/paper" className={`nav-item ${isActive('/admin/settings/paper') ? 'active' : ''}`}>
-              <span className="icon">🖨️</span>ตั้งค่าหน้ากระดาษ
-            </Link>
+            
+            {can('manage_permissions') && (
+              <Link href="/admin/permissions" className={`nav-item ${isActive('/admin/permissions') ? 'active' : ''}`}>
+                <span className="icon">🔐</span>จัดการสิทธิ์
+              </Link>
+            )}
+
+            {can('manage_bank') && (
+              <Link href="/admin/settings/bank" className={`nav-item ${isActive('/admin/settings/bank') ? 'active' : ''}`}>
+                <span className="icon">🏦</span>ตั้งค่าบัญชีธนาคาร
+              </Link>
+            )}
+
+            {can('manage_paper') && (
+              <Link href="/admin/settings/paper" className={`nav-item ${isActive('/admin/settings/paper') ? 'active' : ''}`}>
+                <span className="icon">🖨️</span>ตั้งค่าหน้ากระดาษ
+              </Link>
+            )}
           </>
         )}
       </nav>

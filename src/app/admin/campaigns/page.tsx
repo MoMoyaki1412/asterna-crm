@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
+import { useAdminAuth } from '@/contexts/AdminAuthContext'
+import Link from 'next/link'
 
 type Campaign = {
   id: number
@@ -13,6 +15,7 @@ type Campaign = {
 }
 
 export default function CampaignsPage() {
+  const { can, loading: authLoading } = useAdminAuth()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -91,6 +94,21 @@ export default function CampaignsPage() {
     return parts.join(' + ') || '—'
   }
 
+  if (authLoading) {
+    return <div className="page-body" style={{ padding: 40, color: 'var(--gold-primary)' }}>⏳ กำลังโหลด...</div>
+  }
+
+  if (!can('view_campaigns')) {
+    return (
+      <div className="page-body animate-in" style={{ padding: 60, textAlign: 'center' }}>
+        <div style={{ fontSize: 64, marginBottom: 24 }}>🔒</div>
+        <h2 style={{ fontSize: 24, fontWeight: 800, marginBottom: 12 }}>ไม่มีสิทธิ์เข้าถึง</h2>
+        <p style={{ color: 'var(--gray-text)', marginBottom: 24 }}>หน้านี้สำหรับผู้ที่มีสิทธิ์ดูแคมเปญส่วนลดเท่านั้น</p>
+        <Link href="/admin" className="btn btn-primary">← กลับ Dashboard</Link>
+      </div>
+    )
+  }
+
   return (
     <>
       <div className="topbar">
@@ -100,62 +118,64 @@ export default function CampaignsPage() {
       <div className="page-body animate-in" style={{ maxWidth: 860 }}>
 
         {/* Add Form */}
-        <div className="card" style={{ padding: 24, marginBottom: 24 }}>
-          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>+ เพิ่มแคมเปญใหม่</h3>
-          <p style={{ fontSize: 12, color: 'var(--gray-text)', marginBottom: 16 }}>
-            กรอกส่วนลดแบบ ฿ หรือ % หรือทั้งคู่ก็ได้ (ระบบจะคิดลดสะสม)
-          </p>
-          <form onSubmit={handleAdd} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div style={{ flex: 2, minWidth: 200 }}>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--gray-text)', marginBottom: 6 }}>ชื่อแคมเปญ <span style={{ color: 'red' }}>*</span></label>
-              <input
-                type="text"
-                className="input"
-                placeholder="เช่น โปรเดือนเกิด ลด 10%"
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                style={{ width: '100%' }}
-                required
-              />
-            </div>
-            <div style={{ flex: 1, minWidth: 110 }}>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--gray-text)', marginBottom: 6 }}>ส่วนลดคงที่ (฿)</label>
-              <input
-                type="number"
-                className="input"
-                placeholder="0"
-                min={0}
-                value={newAmount}
-                onChange={e => setNewAmount(e.target.value)}
-                style={{ width: '100%' }}
-              />
-            </div>
-            <div style={{ flex: 1, minWidth: 110 }}>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--gray-text)', marginBottom: 6 }}>ส่วนลด % (จากยอดรวม)</label>
-              <div style={{ position: 'relative' }}>
+        {can('edit_campaigns') && (
+          <div className="card" style={{ padding: 24, marginBottom: 24 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>+ เพิ่มแคมเปญใหม่</h3>
+            <p style={{ fontSize: 12, color: 'var(--gray-text)', marginBottom: 16 }}>
+              กรอกส่วนลดแบบ ฿ หรือ % หรือทั้งคู่ก็ได้ (ระบบจะคิดลดสะสม)
+            </p>
+            <form onSubmit={handleAdd} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ flex: 2, minWidth: 200 }}>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--gray-text)', marginBottom: 6 }}>ชื่อแคมเปญ <span style={{ color: 'red' }}>*</span></label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="เช่น โปรเดือนเกิด ลด 10%"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  style={{ width: '100%' }}
+                  required
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 110 }}>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--gray-text)', marginBottom: 6 }}>ส่วนลดคงที่ (฿)</label>
                 <input
                   type="number"
                   className="input"
                   placeholder="0"
                   min={0}
-                  max={100}
-                  value={newPercent}
-                  onChange={e => setNewPercent(e.target.value)}
-                  style={{ width: '100%', paddingRight: 28 }}
+                  value={newAmount}
+                  onChange={e => setNewAmount(e.target.value)}
+                  style={{ width: '100%' }}
                 />
-                <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-text)', fontSize: 13 }}>%</span>
               </div>
-            </div>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={saving}
-              style={{ padding: '10px 22px', whiteSpace: 'nowrap' }}
-            >
-              {saving ? '⏳...' : '+ เพิ่ม'}
-            </button>
-          </form>
-        </div>
+              <div style={{ flex: 1, minWidth: 110 }}>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--gray-text)', marginBottom: 6 }}>ส่วนลด % (จากยอดรวม)</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="number"
+                    className="input"
+                    placeholder="0"
+                    min={0}
+                    max={100}
+                    value={newPercent}
+                    onChange={e => setNewPercent(e.target.value)}
+                    style={{ width: '100%', paddingRight: 28 }}
+                  />
+                  <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-text)', fontSize: 13 }}>%</span>
+                </div>
+              </div>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={saving}
+                style={{ padding: '10px 22px', whiteSpace: 'nowrap' }}
+              >
+                {saving ? '⏳...' : '+ เพิ่ม'}
+              </button>
+            </form>
+          </div>
+        )}
 
         {/* Campaigns List */}
         <div className="card">
@@ -190,44 +210,50 @@ export default function CampaignsPage() {
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <button
-                          onClick={() => toggleActive(c)}
+                          onClick={() => can('edit_campaigns') && toggleActive(c)}
+                          disabled={!can('edit_campaigns')}
                           style={{
                             background: c.is_active ? 'rgba(76,175,118,0.15)' : 'rgba(255,255,255,0.05)',
                             color: c.is_active ? 'var(--success)' : 'var(--gray-text)',
                             border: `1px solid ${c.is_active ? 'var(--success)' : 'var(--gray-border)'}`,
                             borderRadius: 20, padding: '4px 12px', fontSize: 12,
-                            fontWeight: 600, cursor: 'pointer',
+                            fontWeight: 600, cursor: can('edit_campaigns') ? 'pointer' : 'not-allowed',
+                            opacity: can('edit_campaigns') ? 1 : 0.6
                           }}
                         >
                           {c.is_active ? '✓ เปิดใช้งาน' : '✕ ปิดการใช้งาน'}
                         </button>
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        {confirmDeleteId === c.id ? (
-                          <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        {can('edit_campaigns') ? (
+                          confirmDeleteId === c.id ? (
+                            <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                              <button
+                                onClick={() => handleDelete(c.id)}
+                                style={{ background: '#e53e3e', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                              >
+                                ยืนยันลบ
+                              </button>
+                              <button
+                                onClick={() => setConfirmDeleteId(null)}
+                                style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer', color: 'var(--gray-text)' }}
+                              >
+                                ✕
+                              </button>
+                            </span>
+                          ) : (
                             <button
                               onClick={() => handleDelete(c.id)}
-                              style={{ background: '#e53e3e', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                              title="ลบแคมเปญ"
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#e53e3e', padding: '4px 8px', borderRadius: 6 }}
+                              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(229,62,62,0.12)')}
+                              onMouseLeave={e => (e.currentTarget.style.background = 'none')}
                             >
-                              ยืนยันลบ
+                              🗑️
                             </button>
-                            <button
-                              onClick={() => setConfirmDeleteId(null)}
-                              style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer', color: 'var(--gray-text)' }}
-                            >
-                              ✕
-                            </button>
-                          </span>
+                          )
                         ) : (
-                          <button
-                            onClick={() => handleDelete(c.id)}
-                            title="ลบแคมเปญ"
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#e53e3e', padding: '4px 8px', borderRadius: 6 }}
-                            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(229,62,62,0.12)')}
-                            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                          >
-                            🗑️
-                          </button>
+                          <span style={{ color: 'rgba(255,255,255,0.1)' }}>—</span>
                         )}
                       </td>
                     </tr>

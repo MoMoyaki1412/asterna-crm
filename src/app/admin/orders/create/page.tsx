@@ -17,6 +17,7 @@ type Product = {
   stock_reserved: number
   stock_shipped: number
   active_ingredients: string[]
+  image_url: string
 }
 
 type LineItem = {
@@ -340,10 +341,8 @@ function CreateOrderPageContent() {
 
       await supabase.from('customers').update(customerUpdates).eq('id', customer.id)
 
-      // Increment coupon uses_count
-      if (appliedCoupon) {
-        await supabase.from('coupons').update({ uses_count: appliedCoupon.uses_count + 1 }).eq('id', appliedCoupon.id)
-      }
+      // Increments for coupons/campaigns are now handled by status transitions
+      // since new orders are created as 'unpaid' (not a 'Used' status).
 
       // alert('✅ เปิดบิลสำเร็จ!')
       router.push('/admin/orders')
@@ -393,6 +392,7 @@ function CreateOrderPageContent() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead style={{ background: 'var(--black-card)', fontSize: 12, color: 'var(--gray-text)' }}>
                   <tr>
+                    <th style={{ padding: '10px 14px', width: 60 }}>รูป</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left' }}>สินค้า</th>
                     <th style={{ padding: '10px 14px', textAlign: 'center', width: 80 }}>จำนวน</th>
                     <th style={{ padding: '10px 14px', textAlign: 'right', width: 100 }}>ราคา/ชิ้น</th>
@@ -405,6 +405,15 @@ function CreateOrderPageContent() {
                     const pricing = getLineItemPricing(item)
                     return (
                       <tr key={index} style={{ borderTop: '1px solid var(--gray-border)' }}>
+                        <td style={{ padding: '10px 14px' }}>
+                          <div style={{ width: 44, height: 44, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--gray-border)', background: 'var(--black-card)' }}>
+                            <img 
+                              src={item.product.image_url || 'https://via.placeholder.com/44x44?text=?'} 
+                              alt={item.product.name}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          </div>
+                        </td>
                         <td style={{ padding: '10px 14px' }}>
                           <select 
                             className="input"
@@ -458,7 +467,7 @@ function CreateOrderPageContent() {
                   })}
                   {lineItems.length === 0 && (
                     <tr style={{ borderTop: '1px solid var(--gray-border)' }}>
-                      <td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--gray-text)' }}>
+                      <td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--gray-text)' }}>
                         ยังไม่มีรายการสินค้า
                       </td>
                     </tr>

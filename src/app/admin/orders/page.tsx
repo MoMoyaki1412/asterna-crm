@@ -134,14 +134,62 @@ export default function OrdersPage() {
       toast.error('คุณไม่มีสิทธิ์ลบออร์เดอร์')
       return
     }
-    const { error } = await supabase.from('orders').delete().eq('id', id)
-    if (!error) {
+
+    try {
+      // 1. Fetch order details before deletion for restoration
+      const { data: order } = await supabase.from('orders').select('*').eq('id', id).single()
+      if (!order) return
+      const { data: items } = await supabase.from('order_items').select('product_id, qty').eq('order_id', id)
+
+      // 2. Reverse Stock Impact (Restore Stock)
+      const RESERVE_STATUSES = ['transferred', 'pending']
+      const SHIP_STATUSES = ['shipped', 'completed']
+      const getImpact = (s: string) => {
+        if (RESERVE_STATUSES.includes(s)) return { res: 1, tot: 0, shp: 0 }
+        if (SHIP_STATUSES.includes(s)) return { res: 0, tot: -1, shp: 1 }
+        return { res: 0, tot: 0, shp: 0 }
+      }
+
+      const impact = getImpact(order.status)
+      if (items && (impact.res !== 0 || impact.tot !== 0 || impact.shp !== 0)) {
+        for (const item of items) {
+          await supabase.rpc('handle_stock_impact', {
+            p_id: item.product_id,
+            diff_res: -(impact.res * item.qty),
+            diff_tot: -(impact.tot * item.qty),
+            diff_shp: -(impact.shp * item.qty)
+          })
+        }
+      }
+
+      // 3. Restore Coupon/Campaign Usage
+      const USED_STATUSES = ['transferred', 'pending', 'shipped', 'completed']
+      if (USED_STATUSES.includes(order.status)) {
+        if (order.coupon_id) {
+          const { data: cp } = await supabase.from('coupons').select('uses_count').eq('id', order.coupon_id).single()
+          if (cp) {
+            await supabase.from('coupons').update({ uses_count: Math.max(0, cp.uses_count - 1) }).eq('id', order.coupon_id)
+          }
+        }
+        if (order.campaign_id) {
+          const { data: camp } = await supabase.from('campaigns').select('uses_count').eq('id', order.campaign_id).single()
+          if (camp) {
+            await supabase.from('campaigns').update({ uses_count: Math.max(0, (camp as any).uses_count - 1) }).eq('id', order.campaign_id)
+          }
+        }
+      }
+
+      // 4. Perform Deletion
+      const { error } = await supabase.from('orders').delete().eq('id', id)
+      if (error) throw error
+
       logActivity(myProfile?.id || 'system', 'DELETE_ORDER', 'orders', id.toString())
       setOrders(prev => prev.filter(o => o.id !== id))
       setFiltered(prev => prev.filter(o => o.id !== id))
       setConfirmDeleteId(null)
-    } else {
-      toast.error('❌ ลบออร์เดอร์ไม่สำเร็จ: ' + error.message)
+      toast.success('ลบออร์เดอร์และคืนสต็อกเรียบร้อยแล้ว')
+    } catch (err: any) {
+      toast.error('❌ ลบไม่สำเร็จ: ' + err.message)
       setConfirmDeleteId(null)
     }
   }
@@ -203,16 +251,68 @@ export default function OrdersPage() {
       toast.error('คุณไม่มีสิทธิ์เปลี่ยนสถานะออร์เดอร์')
       return
     }
-    const { error } = await supabase.from('orders').update({ 
-      status: newStatus
-    }).eq('id', id)
 
-    if (!error) {
+    try {
+      // 1. Fetch current status and items for Inventory Sync
+      const { data: orderData } = await supabase.from('orders').select('status').eq('id', id).single()
+      const oldStatus = orderData?.status || 'pending'
+      if (oldStatus === newStatus) return
+
+      const { data: items } = await supabase.from('order_items').select('product_id, qty').eq('order_id', id)
+      
+      const RESERVE_STATUSES = ['transferred', 'pending']
+      const SHIP_STATUSES = ['shipped', 'completed']
+
+      const getImpact = (status: string) => {
+        if (RESERVE_STATUSES.includes(status)) return { res: 1, tot: 0, shp: 0 }
+        if (SHIP_STATUSES.includes(status)) return { res: 0, tot: -1, shp: 1 }
+        return { res: 0, tot: 0, shp: 0 }
+      }
+
+      const oldI = getImpact(oldStatus)
+      const newI = getImpact(newStatus)
+      
+      const diffRes = newI.res - oldI.res
+      const diffTot = newI.tot - oldI.tot
+      const diffShp = newI.shp - oldI.shp
+
+      if (diffRes !== 0 || diffTot !== 0 || diffShp !== 0) {
+        for (const item of (items || [])) {
+          await supabase.rpc('handle_stock_impact', {
+            p_id: item.product_id,
+            diff_res: diffRes * item.qty,
+            diff_tot: diffTot * item.qty,
+            diff_shp: diffShp * item.qty
+          })
+        }
+      }
+
+      // 1.5 Coupon/Campaign Usage Sync (Bulk)
+      const USED_STATUSES = ['transferred', 'pending', 'shipped', 'completed']
+      const oldIsUsed = USED_STATUSES.includes(oldStatus)
+      const newIsUsed = USED_STATUSES.includes(newStatus)
+      if (oldIsUsed !== newIsUsed) {
+        const { data: fullOrder } = await supabase.from('orders').select('coupon_id, campaign_id').eq('id', id).single()
+        const diff = newIsUsed ? 1 : -1
+        if (fullOrder?.coupon_id) {
+          const { data: cp } = await supabase.from('coupons').select('uses_count').eq('id', fullOrder.coupon_id).single()
+          if (cp) await supabase.from('coupons').update({ uses_count: Math.max(0, cp.uses_count + diff) }).eq('id', fullOrder.coupon_id)
+        }
+        if (fullOrder?.campaign_id) {
+          const { data: camp } = await supabase.from('campaigns').select('uses_count').eq('id', fullOrder.campaign_id).single()
+          if (camp) await supabase.from('campaigns').update({ uses_count: Math.max(0, (camp as any).uses_count + diff) }).eq('id', fullOrder.campaign_id)
+        }
+      }
+
+      // 2. Perform Update
+      const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', id)
+      if (error) throw error
+
       logActivity(myProfile?.id || 'system', 'UPDATE_ORDER_STATUS', 'orders', id.toString(), { status: newStatus })
       setOrders(orders.map(o => o.id === id ? { ...o, status: newStatus } : o))
       setFiltered(filtered.map(o => o.id === id ? { ...o, status: newStatus } : o))
-    } else {
-      toast.error('❌ อัปเดตสถานะไม่สำเร็จ: ' + error.message)
+    } catch (err: any) {
+      toast.error('❌ อัปเดตสถานะไม่สำเร็จ: ' + err.message)
     }
   }
 

@@ -62,10 +62,10 @@ export default function BankSettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (!authLoading && !can('manage_permissions')) {
-      router.replace('/admin')
+    if (!authLoading && !can('manage_bank')) {
+      // Access denied will be handled by the UI below
     }
-  }, [authLoading, can])
+  }, [authLoading, can, router])
 
   useEffect(() => { fetchAccounts() }, [])
 
@@ -206,6 +206,23 @@ export default function BankSettingsPage() {
 
   if (authLoading || loading) {
     return <div style={{ padding: 40, color: 'var(--gray-text)' }}>⏳ กำลังโหลด...</div>
+  }
+
+  if (!authLoading && !can('manage_bank')) {
+    return (
+      <div className="page-body animate-in" style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        minHeight: '70vh', textAlign: 'center', gap: 16
+      }}>
+        <div style={{ fontSize: 64 }}>🛡️</div>
+        <h2 style={{ fontSize: 24, fontWeight: 800 }}>สิทธิ์การเข้าถึงถูกจำกัด</h2>
+        <p style={{ color: 'var(--gray-text)', maxWidth: 400 }}>
+          ขออภัย คุณไม่ได้รับอนุญาตให้จัดการบัญชีธนาคารในส่วนของระบบตั้งค่า<br/>
+          หากต้องการเข้าถึง กรุณาติดต่อ Owner ของระบบ
+        </p>
+        <button onClick={() => router.push('/admin')} className="btn btn-ghost">กลับไปยังหน้าหลัก</button>
+      </div>
+    )
   }
 
   return (

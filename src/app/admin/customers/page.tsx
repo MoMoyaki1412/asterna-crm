@@ -126,7 +126,7 @@ export default function CustomersPage() {
   useEffect(() => {
     async function load() {
       const [cRes, pRes, tRes, gRes] = await Promise.all([
-        supabase.from('customers').select('*').order('id', { ascending: false }),
+        supabase.from('customers').select('*').eq('is_active', true).order('id', { ascending: false }),
         supabase.from('products').select('id, name, sku').order('id'),
         supabase.from('customer_tiers').select('*').order('discount_percent', { ascending: true }),
         supabase.from('customer_tags').select('*').order('name', { ascending: true })
@@ -315,15 +315,18 @@ export default function CustomersPage() {
     setDeleting(true)
     setConfirmDelete(false)
     try {
-      // Remove related records to avoid foreign key constraints
-      await supabase.from('messages').delete().eq('customer_id', selectedCustomer.id)
-      await supabase.from('orders').delete().eq('customer_id', selectedCustomer.id)
-      const { error } = await supabase.from('customers').delete().eq('id', selectedCustomer.id)
+      const { error } = await supabase
+        .from('customers')
+        .update({ is_active: false })
+        .eq('id', selectedCustomer.id)
+
       if (!error) {
+        logActivity(myProfile?.id || 'system', 'DELETE_CUSTOMER_SOFT', 'customers', selectedCustomer.id.toString(), { name: selectedCustomer.name })
         const deletedId = selectedCustomer.id
         setSelectedCustomer(null)
         setCustomerOrders([])
         setCustomers(prev => prev.filter(c => c.id !== deletedId))
+        toast.success('ลบรายชื่อลูกค้าเรียบร้อยแล้ว (Soft Delete)')
       } else {
         console.error('Delete error:', error)
         toast.error('ลบไม่สำเร็จ: ' + error.message)

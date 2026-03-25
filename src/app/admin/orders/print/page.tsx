@@ -1,7 +1,9 @@
 'use client'
 import { useEffect, useState, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { useAdminAuth } from '@/contexts/AdminAuthContext'
+import Link from 'next/link'
 
 type OrderData = {
   id: number
@@ -42,6 +44,8 @@ const STORE = {
 
 function PrintPageContent() {
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const { profile, can, loading: authLoading } = useAdminAuth()
   const type = searchParams.get('type') || 'label'
   const ids = (searchParams.get('ids') || '').split(',').map(Number).filter(Boolean)
 
@@ -95,10 +99,28 @@ function PrintPageContent() {
     load()
   }, [])
 
-  if (loading) {
+  if (authLoading || (loading && ids.length > 0)) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#1a1a1a', color: '#c9a84c', fontSize: 18 }}>
-        ⏳ กำลังเตรียมข้อมูลสำหรับพิมพ์...
+        ⏳ กำลังเตรียมข้อมูล...
+      </div>
+    )
+  }
+
+  if (!profile) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#1a1a1a', color: '#fff', gap: 20 }}>
+        <h2 style={{ color: '#e53e3e' }}>🔒 กรุณาล็อกอินเพื่อเข้าถึงหน้านี้</h2>
+        <Link href="/admin/login" className="btn btn-primary">ไปหน้าล็อกอิน</Link>
+      </div>
+    )
+  }
+
+  if (!can('view_full_pii') && !can('manage_orders')) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#1a1a1a', color: '#fff', gap: 20 }}>
+        <h2 style={{ color: '#e53e3e' }}>🚫 คุณไม่มีสิทธิ์ดูข้อมูลเบอร์โทรศัพท์และที่อยู่ลูกค้า</h2>
+        <button onClick={() => window.close()} className="btn btn-ghost">ปิดหน้านี้</button>
       </div>
     )
   }

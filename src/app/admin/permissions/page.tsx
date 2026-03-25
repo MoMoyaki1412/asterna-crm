@@ -18,13 +18,21 @@ const PERMISSION_LIST: { id: Permission; label: string }[] = [
   { id: 'create_orders', label: 'สร้างออร์เดอร์' },
   { id: 'delete_orders', label: 'ลบ / ยกเลิกออร์เดอร์' },
   { id: 'view_customers', label: 'ดูลูกค้า' },
-  { id: 'view_full_pii', label: 'ดูเบอร์โทรและที่อยู่เต็ม (PII)' },
+  { id: 'view_full_pii', label: '👀 ดูเบอร์โทรและที่อยู่เต็ม (PII)' },
+  { id: 'reveal_pii', label: '👁️ กดดูข้อมูล PII ที่ซ่อนอยู่ (บันทึกประวัติ)' },
+  { id: 'view_admin_list', label: '👥 ดูรายชื่อแอดมินทั้งหมด' },
   { id: 'edit_customers', label: 'แก้ไขข้อมูลลูกค้า / แท็ก' },
   { id: 'view_conversations', label: 'Inbox / การสนทนา' },
   { id: 'manage_orders', label: 'จัดการ/แก้ไขสถานะออร์เดอร์' },
   { id: 'manage_tags', label: 'จัดการแท็กและ Tier' },
   { id: 'manage_permissions', label: 'จัดการสิทธิ์แอดมิน (Matrix / Roles)' },
   { id: 'create_admins', label: 'สร้างและจัดการบัญชีแอดมิน' },
+  { id: 'view_campaigns', label: '📢 ดูแคมเปญส่วนลด' },
+  { id: 'edit_campaigns', label: '📝 จัดการแคมเปญ (สร้าง/แก้ไข)' },
+  { id: 'view_vouchers', label: '🎫 ดูคูปองส่วนลด' },
+  { id: 'edit_vouchers', label: '✏️ จัดการคูปอง (สร้าง/แก้ไข)' },
+  { id: 'manage_bank', label: '🏦 ตั้งค่าบัญชีธนาคาร' },
+  { id: 'manage_paper', label: '🖨️ ตั้งค่าหน้ากระดาษ' },
 ]
 
 type Role = {
@@ -185,8 +193,18 @@ export default function PermissionsPage() {
     setError('')
 
     try {
+      // 1. Insert into admin_invitations FIRST (Requires Owner permission via RLS)
+      const { error: invErr } = await supabase.from('admin_invitations').insert({
+        email: createAdminForm.email.toLowerCase().trim(),
+        role: createAdminForm.role,
+        created_by: myProfile?.id
+      })
+      if (invErr) throw new Error(`ไม่สามารถสร้างคำเชิญได้: ${invErr.message}`)
+
+      // 2. Call Supabase Auth SignUp
+      // Note: This will automatically sign the current user (Owner) OUT and sign the new user IN.
       const { data: authData, error: authErr } = await supabase.auth.signUp({
-        email: createAdminForm.email,
+        email: createAdminForm.email.trim(),
         password: createAdminForm.password,
         options: { data: { display_name: createAdminForm.name } }
       })
@@ -194,24 +212,18 @@ export default function PermissionsPage() {
       if (authErr) throw authErr
       if (!authData.user) throw new Error('ไม่สามารถสร้างผู้ใช้ได้')
 
-      const { error: profileErr } = await supabase
-        .from('admin_profiles')
-        .insert({
-          id: authData.user.id,
-          email: createAdminForm.email,
-          display_name: createAdminForm.name || createAdminForm.email.split('@')[0],
-          role: createAdminForm.role,
-        })
-
-      if (profileErr) throw profileErr
-
+      // (The Database Trigger will automatically handle creating the admin_profiles row)
       logActivity(myProfile?.id || 'system', 'CREATE_ADMIN', 'admin_profiles', authData.user.id, { email: createAdminForm.email, role: createAdminForm.role })
-      await fetchData()
-      setShowCreateAdmin(false)
-      setCreateAdminForm({ email: '', password: '', name: '', role: 'staff' })
+      
+      toast.success('สร้างแอดมินสำเร็จ! เนื่องจากมาตรการความปลอดภัย ระบบจะนำคุณออกจากระบบเพื่อให้แอดมินใหม่พร้อมใช้งาน', { duration: 5000 })
+      
+      // Since ownership session is dropped, we redirect to login after a brief delay
+      setTimeout(() => {
+        window.location.href = '/login'
+      }, 2500)
+
     } catch (err: any) {
       setError(err.message || 'เกิดข้อผิดพลาด')
-    } finally {
       setCreatingAdmin(false)
     }
   }
@@ -499,7 +511,8 @@ export default function PermissionsPage() {
         )}
 
         {/* Admin List */}
-        <div className="card" style={{ padding: 0, marginBottom: 32, overflow: 'hidden' }}>
+        {can('view_admin_list') && (
+          <div className="card" style={{ padding: 0, marginBottom: 32, overflow: 'hidden' }}>
           <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--gray-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ fontSize: 16, fontWeight: 800 }}>👥 รายชื่อแอดมินทั้งหมด ({admins.length} คน)</h3>
             {can('create_admins') && (
@@ -630,6 +643,7 @@ export default function PermissionsPage() {
             </tbody>
           </table>
         </div>
+        )}
 
         {/* Permission Matrix */}
         {can('manage_permissions') && (

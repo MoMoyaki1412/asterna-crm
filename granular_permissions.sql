@@ -58,7 +58,7 @@ VALUES
     -- Manager
     ('manager', 'view_dashboard'), ('manager', 'edit_stock'), ('manager', 'view_orders'), ('manager', 'create_orders'), ('manager', 'view_customers'), 
     ('manager', 'edit_customers'), ('manager', 'view_conversations'), ('manager', 'manage_tags'), ('manager', 'view_stock'), ('manager', 'view_products'),
-    ('manager', 'view_full_pii'), ('manager', 'manage_orders'), ('manager', 'reveal_pii')
+    ('manager', 'view_full_pii'), ('manager', 'manage_orders'), ('manager', 'reveal_pii'), ('manager', 'view_admin_list')
 ON CONFLICT DO NOTHING;
 
 -- 5. Create Helper Function to check permissions in RLS
