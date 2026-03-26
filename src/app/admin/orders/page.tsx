@@ -10,6 +10,7 @@ import { maskPhone, maskAddress } from '@/lib/security'
 
 type Order = {
   id: number
+  order_number: string
   customer_name: string
   order_date: string
   status: string
@@ -80,7 +81,7 @@ export default function OrdersPage() {
     if (!silent) setLoading(true)
     const { data } = await supabase
       .from('orders')
-      .select('id, customer_name, order_date, status, total, payment_method, tracking, items_summary, bill_type, expiry_date, invoice_token, payment_slip_url, note, source')
+      .select('id, order_number, customer_name, order_date, status, total, payment_method, tracking, items_summary, bill_type, expiry_date, invoice_token, payment_slip_url, note, source')
       .order('order_date', { ascending: false })
       .order('id', { ascending: false })
     if (data) {
@@ -590,7 +591,7 @@ export default function OrdersPage() {
                         />
                       </td>
                       <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
-                        <div style={{ fontWeight: 700, color: 'var(--gold-primary)', fontSize: 14 }}>#{o.id}</div>
+                        <div style={{ fontWeight: 700, color: 'var(--gold-primary)', fontSize: 14 }}>{o.order_number || `#${o.id}`}</div>
                         <div style={{ fontSize: 12, color: 'var(--gray-text)', marginTop: 2 }}>{o.order_date ? new Date(o.order_date).toLocaleDateString('th-TH') : '—'}</div>
                       </td>
                       <td style={{ padding: '12px 16px', fontWeight: 600 }}>{o.customer_name}</td>

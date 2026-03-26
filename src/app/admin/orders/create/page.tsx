@@ -78,7 +78,7 @@ function CreateOrderPageContent() {
       
       // If customer_id in URL, load it
       if (urlCustomerId) {
-        const { data: cData } = await supabase.from('customers').select('*').eq('id', parseInt(urlCustomerId)).single()
+        const { data: cData } = await supabase.from('customers').select('*').eq('id', parseInt(urlCustomerId)).eq('is_active', true).single()
         if (cData) handleSelectCustomer(cData)
       }
     }
@@ -148,7 +148,7 @@ function CreateOrderPageContent() {
   }
 
   const fetchCustomerDetails = async (id: number) => {
-    const { data } = await supabase.from('customers').select('*').eq('id', id).single()
+    const { data } = await supabase.from('customers').select('*').eq('id', id).eq('is_active', true).single()
     if (data) {
       if (data.address_subdistrict) setSubdistrict(data.address_subdistrict)
       if (data.address_district) setDistrict(data.address_district)

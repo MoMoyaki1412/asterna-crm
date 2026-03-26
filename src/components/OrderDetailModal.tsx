@@ -89,6 +89,7 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
   const [expiryDate, setExpiryDate] = useState('')
   const [invoiceToken, setInvoiceToken] = useState('')
   const [paymentSlipUrl, setPaymentSlipUrl] = useState('')
+  const [orderNumber, setOrderNumber] = useState('')
 
   // Form State: Col 3 (Customer & Shipping)
   const [customer, setCustomer] = useState<Customer | null>(null)
@@ -123,7 +124,7 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
       if (bRes.data) setBanks(bRes.data)
 
       // 2. Fetch order data
-      const { data: oData } = await supabase.from('orders').select('*, invoice_token, payment_slip_url').eq('id', orderId).single()
+      const { data: oData } = await supabase.from('orders').select('*, order_number, invoice_token, payment_slip_url').eq('id', orderId).single()
       if (!oData) return
 
       // Map basic fields
@@ -140,6 +141,7 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
       setTracking(oData.tracking || '')
       setInvoiceToken(oData.invoice_token || '')
       setPaymentSlipUrl(oData.payment_slip_url || '')
+      setOrderNumber(oData.order_number || '')
       
       setAddressLine(oData.shipping_address || '')
       setSubdistrict(oData.address_subdistrict || '')
@@ -562,7 +564,7 @@ export function OrderDetailModal({ orderId, onClose, onSaved, onStatusChange }: 
         {/* Header */}
         <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--gray-border)', position: 'sticky', top: 0, background: 'var(--black-bg)', zIndex: 10, padding: '16px 24px' }}>
           <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-            <h2 className="card-title" style={{ fontSize: 20, margin: 0 }}>✏️ แก้ไขบิล #{orderId}</h2>
+            <h2 className="card-title" style={{ fontSize: 20, margin: 0 }}>✏️ แก้ไขบิล {orderNumber || `#${orderId}`}</h2>
             <span style={{ fontSize: 12, color: 'var(--gray-text)' }}>Origin: {source || 'Asterna CRM'}</span>
           </div>
           <div style={{ display: 'flex', gap: 12 }}>

@@ -6,6 +6,7 @@ import generatePayload from 'promptpay-qr'
 
 type OrderData = {
   id: number
+  order_number: string
   customer_name: string
   order_date: string
   status: string
@@ -279,7 +280,7 @@ export default function InvoiceClient({ token }: { token: string }) {
           <div style={{ background: '#fff', color: '#333', borderRadius: 12, padding: '32px 24px', marginBottom: 24, border: '1px solid #eaeaea' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eaeaea', paddingBottom: 16, marginBottom: 24 }}>
               <div>
-                <div style={{ fontSize: 24, color: '#2b2b2b', fontWeight: 700 }}>บิลเลขที่ {order.id}</div>
+                <div style={{ fontSize: 24, color: '#2b2b2b', fontWeight: 700 }}>บิลเลขที่ {order.order_number || `#${order.id}`}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gold-dark)', padding: '4px 12px', border: '1px solid var(--gold-dark)', borderRadius: 20 }}>ใบเสร็จ</div>

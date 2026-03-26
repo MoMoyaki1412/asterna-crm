@@ -28,6 +28,7 @@ export default function DashboardPage() {
       const { data: customers } = await supabase
         .from('customers')
         .select('*')
+        .eq('is_active', true)
         .order('total_orders', { ascending: false })
 
       if (customers) {

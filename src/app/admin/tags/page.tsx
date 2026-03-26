@@ -42,7 +42,7 @@ export default function TagsManagementPage() {
       const [tRes, cRes, pRes] = await Promise.all([
         supabase.from('customer_tiers').select('*').order('discount_percent', { ascending: true }),
         supabase.from('customer_tags').select('*').order('name', { ascending: true }),
-        supabase.from('products').select('id, name, sku').order('id')
+        supabase.from('products').select('id, name, sku').eq('is_active', true).order('id')
       ])
 
       if (tRes.data) setTiers(tRes.data)

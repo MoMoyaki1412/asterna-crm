@@ -7,6 +7,7 @@ import Link from 'next/link'
 
 type OrderData = {
   id: number
+  order_number: string
   customer_name: string
   order_date: string
   status: string
@@ -184,7 +185,7 @@ function PrintPageContent() {
       {/* Receiver */}
       <div style={{ border: '2px solid #000', padding: 16, position: 'relative', marginBottom: 24 }}>
         <div style={{ position: 'absolute', top: 8, right: 8, background: '#000', color: '#fff', padding: '4px 12px', fontWeight: 700, fontSize: 14 }}>
-          #{o.id}
+          {o.order_number || `#${o.id}`}
         </div>
         <div style={{ fontSize: 16, fontWeight: 700 }}>ผู้รับ</div>
         <div style={{ fontSize: 15, marginTop: 4 }}>{o.receiver_name || o.customer_name}</div>
@@ -207,7 +208,7 @@ function PrintPageContent() {
         <h3 style={{ textAlign: 'center', fontSize: 16, fontWeight: 700, marginBottom: 4 }}>ใบจัดเตรียมของ (Stock Preparing List)</h3>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 12, color: '#000' }}>
           <span>จำนวนสินค้าสั่งทั้งหมด : {o.items.length} ชนิด {totalItems(o.items)} ชิ้น</span>
-          <span style={{ background: '#000', color: '#fff', padding: '2px 10px', fontWeight: 700, fontSize: 13 }}>#{o.id}</span>
+          <span style={{ background: '#000', color: '#fff', padding: '2px 10px', fontWeight: 700, fontSize: 13 }}>{o.order_number || `#${o.id}`}</span>
         </div>
         <div style={{ fontSize: 11, marginBottom: 8, color: '#000' }}>พิมพ์เมื่อ : {formatDate(o.order_date)}</div>
 
@@ -272,7 +273,7 @@ function PrintPageContent() {
 
       {/* Receiver */}
       <div style={{ border: '2px solid #000', padding: 12, position: 'relative', marginBottom: 16 }}>
-        <div style={{ position: 'absolute', top: 8, right: 8, fontWeight: 700, fontSize: 14 }}>#{o.id}</div>
+        <div style={{ position: 'absolute', top: 8, right: 8, fontWeight: 700, fontSize: 14 }}>{o.order_number || `#${o.id}`}</div>
         <div style={{ fontSize: 13 }}>ผู้รับ: {o.receiver_name || o.customer_name}</div>
         <div style={{ fontSize: 12 }}>{getRecipientAddr(o)}</div>
         <div style={{ fontSize: 12 }}>โทร: {o.receiver_phone || o.tracking || '-'}</div>

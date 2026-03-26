@@ -195,7 +195,7 @@ function ConversationsPageContent() {
 
       const [cRes, tRes, bRes, gRes] = await Promise.all([
         customerIdsWithMessages.length > 0
-          ? supabase.from('customers').select('id, name, phone, address, tags, note, total_orders, created_at').in('id', customerIdsWithMessages).order('name', { ascending: true })
+          ? supabase.from('customers').select('id, name, phone, address, tags, note, total_orders, created_at').in('id', customerIdsWithMessages).eq('is_active', true).order('name', { ascending: true })
           : Promise.resolve({ data: [] as Customer[] }),
         supabase.from('customer_tiers').select('*').order('discount_percent', { ascending: true }),
         supabase.from('bank_accounts').select('*').eq('is_active', true).order('sort_order', { ascending: true }),

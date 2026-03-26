@@ -144,6 +144,7 @@ export default function AdminDashboard() {
       const { data: customers } = await supabase
         .from('customers')
         .select('id, name, total_orders')
+        .eq('is_active', true)
 
       if (orders) setAllOrders(orders as any)
       if (items) setAllItems(items as any)
